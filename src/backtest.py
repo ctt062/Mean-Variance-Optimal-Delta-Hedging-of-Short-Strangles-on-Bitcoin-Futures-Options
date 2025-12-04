@@ -7,14 +7,16 @@ Prof. Wei JIANG
 This module backtests THREE METHODOLOGIES separately:
 
 METHODOLOGY 1 (M1): Option Strategy and Delta-Hedging (Lecture 6)
-  - Simple 1:1 delta hedge using BTC futures
-  - Hedge ratio = -net_delta (basic delta-neutral)
+  - Simple 50/50 delta hedge split between BTC spot and futures
+  - Hedge ratio = -net_delta split equally (basic delta-neutral)
   - Does NOT use EWMA or optimization
   
 METHODOLOGY 2 (M2): Dynamic Covariance Estimation via EWMA (Lecture 7)
-  - Uses EWMA volatility to adjust hedge ratio
-  - Hedge ratio = -net_delta * (σ_spot / σ_futures)
-  - Accounts for time-varying volatility
+  - Uses EWMA covariance to allocate between spot and futures
+  - Correlation-adjusted allocation: responds to variance differences and correlation
+  - Volatility-adjusted rebalancing: only rebalances when allocation change exceeds threshold
+  - Reduces transaction costs by rebalancing less frequently than M1
+  - Accounts for time-varying volatility and correlation
   - Does NOT use full optimization
 
 METHODOLOGY 3 (M3): Mean-Variance Optimal Portfolio Construction (Lecture 5)
@@ -373,6 +375,9 @@ class BacktestEngine:
         n_periods = len(common_index)
         weights_list = []
         
+        # Track M2's current weights for volatility-adjusted rebalancing
+        m2_current_weights = None
+        
         print(f"Optimizing {n_periods} periods...")
         
         # Run optimization for each period
@@ -388,14 +393,23 @@ class BacktestEngine:
             # ================================================================
             # M1: Simple Delta Hedge (Lecture 6)
             # ================================================================
-            # Simple 1:1 futures hedge: hedge_ratio = -net_delta
+            # Simple 50/50 split: rebalances daily
             m1_weights = compute_naive_hedge(net_delta)
             
             # ================================================================
             # M2: EWMA Volatility-Adjusted Hedge (Lecture 7)
             # ================================================================
-            # Uses EWMA covariance to compute minimum-variance hedge ratio
-            m2_weights = compute_ewma_hedge_weights(cov, net_delta)
+            # Uses EWMA covariance with volatility-adjusted rebalancing
+            # Only rebalances when allocation change exceeds threshold
+            m2_weights = compute_ewma_hedge_weights(
+                cov, 
+                net_delta,
+                current_weights=m2_current_weights,
+                rebalance_threshold=None  # Use volatility-adjusted threshold
+            )
+            
+            # Update current weights for next period
+            m2_current_weights = m2_weights.copy()
             
             # ================================================================
             # M3: Mean-Variance Optimal (Lecture 5)
@@ -808,6 +822,10 @@ class TrainValTestEngine:
         
         # Run optimization
         weights_list = []
+        
+        # Track M2's current weights for volatility-adjusted rebalancing
+        m2_current_weights = None
+        
         for t, date in enumerate(common_index):
             cov_idx = min(t + init_periods, len(cov_series) - 1)
             cov = cov_series[cov_idx]
@@ -815,11 +833,19 @@ class TrainValTestEngine:
             delta_idx = df.index.get_loc(date)
             net_delta = df['net_delta'].iloc[delta_idx]
             
-            # M1: Simple delta hedge
+            # M1: Simple delta hedge (rebalances daily)
             m1_weights = compute_naive_hedge(net_delta)
             
-            # M2: EWMA hedge
-            m2_weights = compute_ewma_hedge_weights(cov, net_delta)
+            # M2: EWMA hedge with volatility-adjusted rebalancing
+            m2_weights = compute_ewma_hedge_weights(
+                cov, 
+                net_delta,
+                current_weights=m2_current_weights,
+                rebalance_threshold=None  # Use volatility-adjusted threshold
+            )
+            
+            # Update current weights for next period
+            m2_current_weights = m2_weights.copy()
             
             # M3: MV Optimal (with custom risk aversion)
             from ._3_MV_Optimization import optimize_hedge_portfolio

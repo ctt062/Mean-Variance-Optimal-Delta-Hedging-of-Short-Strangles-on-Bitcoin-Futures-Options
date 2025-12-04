@@ -434,9 +434,9 @@ RIGOROUS EVALUATION WITH PROPER DATA SPLIT:
 
 THREE METHODOLOGIES COMPARED:
 
-  M1: Delta-Hedging (Lecture 6) - Simple 1:1 futures hedge
-  M2: EWMA Hedge (Lecture 7) - Covariance-adjusted hedge ratio
-  M3: MV Optimal (Lecture 5) - Full Markowitz optimization
+  M1: Delta-Hedging (Lecture 6) - Simple 50/50 split, rebalances daily
+  M2: EWMA Hedge (Lecture 7) - Correlation-adjusted allocation with volatility-adjusted rebalancing
+  M3: MV Optimal (Lecture 5) - Full Markowitz optimization (spot + futures + cash)
 
 KEY FINDINGS:
    1. Hyperparameters tuned on VALIDATION data (no look-ahead bias)

@@ -355,7 +355,7 @@ def simulate_strangle_delta(
 
 def compute_naive_hedge(net_delta: float) -> np.ndarray:
     """
-    Compute naive 1:1 delta hedge using futures only.
+    Compute naive delta hedge using 50/50 split between spot and futures.
     
     This is Methodology 1: Simple Delta-Hedging (Lecture 6).
     
@@ -371,15 +371,21 @@ def compute_naive_hedge(net_delta: float) -> np.ndarray:
     
     Notes
     -----
-    Naive hedge: Use futures to exactly offset delta exposure.
+    Naive hedge: Split delta hedge equally between spot and futures.
     
     If strangle delta = -0.05:
-    - Need to go long 0.05 units of futures
+    - Need to go long 0.025 units of spot
+    - Need to go long 0.025 units of futures
     - Rest in cash
     
     This is the baseline comparison for M2 and M3.
     """
-    return np.array([0.0, -net_delta, 1.0 + net_delta])
+    # 50/50 split between spot and futures
+    w_spot = -net_delta * 0.5
+    w_futures = -net_delta * 0.5
+    w_cash = 1.0 - abs(w_spot) - abs(w_futures)
+    
+    return np.array([w_spot, w_futures, w_cash])
 
 
 def calculate_delta_hedge_pnl(
