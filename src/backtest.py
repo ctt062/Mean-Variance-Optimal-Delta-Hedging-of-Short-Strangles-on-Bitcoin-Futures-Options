@@ -838,10 +838,19 @@ class TrainValTestEngine:
         hedge_pnl = calculate_hedge_pnl_three_methods(df.loc[common_index], weights_df, self.notional)
         
         # Combine with strangle P&L
+        # IMPORTANT: Use total_unhedged to include gap_risk and tail_risk components
+        # total_unhedged = theta + gamma + vega + gap_risk + tail_risk + delta_unhedged
+        # We subtract delta_unhedged since the hedge replaces it, then add hedge P&L
         pnl = pd.DataFrame(index=common_index)
-        pnl['m1_pnl'] = strangle_pnl['theta'] + strangle_pnl['gamma'] + strangle_pnl['vega'] + hedge_pnl['total_hedge_m1']
-        pnl['m2_pnl'] = strangle_pnl['theta'] + strangle_pnl['gamma'] + strangle_pnl['vega'] + hedge_pnl['total_hedge_m2']
-        pnl['m3_pnl'] = strangle_pnl['theta'] + strangle_pnl['gamma'] + strangle_pnl['vega'] + hedge_pnl['total_hedge_m3']
+        
+        # Base strangle P&L (all components except delta, which is replaced by hedge)
+        # This ensures gap_risk and tail_risk are included
+        strangle_base = strangle_pnl['total_unhedged'] - strangle_pnl['delta_unhedged']
+        
+        # Total P&L = base strangle P&L + hedge P&L (hedge replaces delta_unhedged)
+        pnl['m1_pnl'] = strangle_base + hedge_pnl['total_hedge_m1']
+        pnl['m2_pnl'] = strangle_base + hedge_pnl['total_hedge_m2']
+        pnl['m3_pnl'] = strangle_base + hedge_pnl['total_hedge_m3']
         
         # Calculate metrics
         def calc_sharpe(daily_pnl):
@@ -1217,4 +1226,3 @@ if __name__ == "__main__":
     print("=" * 70)
     print(engine.weights_history[['mv_w_spot', 'mv_w_futures', 'mv_w_cash', 
                                    'naive_w_spot', 'naive_w_futures', 'naive_w_cash']].tail())
-
