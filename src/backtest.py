@@ -46,12 +46,15 @@ from .returns import (
     annualize_volatility,
     calculate_sharpe_ratio
 )
-from .covariance import compute_hedge_asset_covariance
-from .optimize import (
-    optimize_hedge_portfolio,
-    compute_naive_hedge,
-    compute_hedge_effectiveness
-)
+# Import from methodology files (M1, M2, M3)
+from . import _1_Option_Delta as m1_module  # M1: Option Strategy and Delta-Hedging
+from . import _2_Covariance_Estimation as m2_module  # M2: EWMA Covariance Estimation
+from . import _3_MV_Optimization as m3_module  # M3: Mean-Variance Optimization
+
+# Import functions from methodology modules
+from ._1_Option_Delta import calculate_strangle_pnl, compute_naive_hedge
+from ._2_Covariance_Estimation import compute_hedge_asset_covariance, compute_ewma_hedge_weights
+from ._3_MV_Optimization import optimize_hedge_portfolio
 
 
 # ============================================================================
@@ -195,98 +198,6 @@ def calculate_performance_metrics(daily_returns: pd.Series,
 # ============================================================================
 # P&L CALCULATION
 # ============================================================================
-
-def calculate_strangle_pnl(df: pd.DataFrame,
-                           notional: float = 100000) -> pd.DataFrame:
-    """
-    Calculate daily P&L for short strangle position.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Data with spot, futures, dvol, net_delta
-    notional : float
-        Notional value of strangle position
-    
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with P&L components
-    
-    Notes
-    -----
-    Short strangle P&L approximation:
-    
-    P&L_t ≈ θ*dt - (1/2)*|Γ|*(ΔS)² - |ν|*Δσ + Δ*ΔS
-    
-    Where:
-    - θ = time decay (positive for short)
-    - Γ = gamma (negative exposure for short)
-    - ν = vega (negative exposure for short)
-    - Δ = delta (small for OTM strangle)
-    
-    Realistic parameters for 10% OTM 30-day BTC short strangle:
-    - Monthly premium collected: ~3-5% of notional
-    - Daily theta: premium/30 = ~0.10-0.17% per day
-    - But gamma/vega losses eat significant portion during vol spikes
-    """
-    pnl = pd.DataFrame(index=df.index)
-    
-    # Price changes
-    spot_change = df['spot'].diff()
-    spot_pct_change = df['spot'].pct_change()
-    dvol_change = df['dvol'].diff()
-    
-    # Normalize parameters by spot
-    spot = df['spot']
-    
-    # =========================================================================
-    # REALISTIC OPTION GREEKS FOR 10% OTM SHORT STRANGLE
-    # =========================================================================
-    # 
-    # Target: Sharpe ratio of 0.5-1.0 (typical for short vol strategies)
-    # Target: Annual volatility of 10-20% (realistic for hedged options)
-    # Target: Annual return of 10-20% (premium collection minus losses)
-    # 
-    # Calibration based on:
-    # - Monthly premium: ~2-3% of notional at ~60-70% IV for 10% OTM
-    # - Win rate: ~60-65% of days
-    # - Occasional large losses on vol spikes and large price moves
-    # =========================================================================
-    
-    # Theta: Daily time decay (positive for short options)
-    # Monthly premium ~2.5% of notional → ~0.083% per day
-    theta_daily_pct = 0.0008  # 0.08% per day = ~29% annual gross
-    pnl['theta'] = theta_daily_pct * notional
-    
-    # Gamma: Loss from price movements squared - KEY RISK FACTOR
-    # For BTC with ~3% daily moves on average:
-    # - Average day: 1.2 * 0.03^2 = 0.11% loss
-    # - Volatile day (5%): 1.2 * 0.05^2 = 0.30% loss  
-    # - Crash day (10%): 1.2 * 0.10^2 = 1.20% loss
-    gamma_coefficient = 1.2  # Calibrated for ~15% annual vol
-    pnl['gamma'] = -gamma_coefficient * (spot_pct_change ** 2) * notional
-    
-    # Vega: Loss/gain from volatility changes - SECOND KEY RISK
-    # Short strangle loses when vol increases
-    # DVOL typically moves 1-3 points per day, occasionally 5-10+
-    # 0.3% per vol point is reasonable for 10% OTM strangle
-    vega_per_vol_point = 0.003 * notional  # 0.3% of notional per vol point
-    pnl['vega'] = -vega_per_vol_point * dvol_change
-    
-    # Delta: P&L from directional exposure (before hedging)
-    # net_delta is typically small (-0.05 to 0.05) for OTM strangle
-    # P&L = delta * spot_return * notional
-    pnl['delta_unhedged'] = df['net_delta'] * spot_pct_change * notional
-    
-    # Total unhedged P&L
-    pnl['total_unhedged'] = pnl['theta'] + pnl['gamma'] + pnl['vega'] + pnl['delta_unhedged']
-    
-    # Drop first row (NaN from diff)
-    pnl = pnl.iloc[1:]
-    
-    return pnl
-
 
 def calculate_hedge_pnl(df: pd.DataFrame,
                         weights: pd.DataFrame,
@@ -484,26 +395,7 @@ class BacktestEngine:
             # M2: EWMA Volatility-Adjusted Hedge (Lecture 7)
             # ================================================================
             # Uses EWMA covariance to compute minimum-variance hedge ratio
-            # hedge_ratio = -cov(spot, futures) / var(futures)
-            # This is the classic variance-minimizing hedge from RiskMetrics
-            spot_var = cov[0, 0]
-            futures_var = cov[1, 1]
-            cov_spot_futures = cov[0, 1]
-            
-            # Minimum variance hedge ratio (adjusted by covariance)
-            if futures_var > 1e-10:
-                mv_hedge_ratio = cov_spot_futures / futures_var
-            else:
-                mv_hedge_ratio = 1.0
-            
-            # M2: Use covariance-adjusted hedge
-            # hedge_position = -net_delta * mv_hedge_ratio
-            m2_futures_weight = -net_delta * mv_hedge_ratio
-            
-            # Clamp to reasonable bounds
-            m2_futures_weight = np.clip(m2_futures_weight, -0.5, 0.5)
-            m2_cash_weight = 1.0 - abs(m2_futures_weight)
-            m2_weights = np.array([0.0, m2_futures_weight, m2_cash_weight])
+            m2_weights = compute_ewma_hedge_weights(cov, net_delta)
             
             # ================================================================
             # M3: Mean-Variance Optimal (Lecture 5)
@@ -526,8 +418,7 @@ class BacktestEngine:
                 'm3_w_spot': m3_weights[0],
                 'm3_w_futures': m3_weights[1],
                 'm3_w_cash': m3_weights[2],
-                'opt_status': diagnostics.get('status', 'unknown'),
-                'mv_hedge_ratio': mv_hedge_ratio
+                'opt_status': diagnostics.get('status', 'unknown')
             })
             
             if (t + 1) % 200 == 0:
@@ -757,6 +648,441 @@ class BacktestEngine:
             comparison[col] = comparison[col].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
         
         return comparison
+
+
+# ============================================================================
+# TRAIN/VALIDATION/TEST ENGINE
+# ============================================================================
+
+class TrainValTestEngine:
+    """
+    Rigorous backtesting engine with proper train/validation/test split.
+    
+    Split Structure:
+    ----------------
+    - Training Period (2022-01-01 to 2023-12-31): ~2 years
+      - Calibrate base models
+      - Estimate initial EWMA parameters
+      
+    - Validation Period (2024-01-01 to 2024-06-30): ~6 months
+      - Tune hyperparameters (lambda, risk aversion)
+      - Select best configuration based on Sharpe ratio
+      
+    - Test Period (2024-07-01 to 2025-12-03): ~1.5 years
+      - Final out-of-sample evaluation
+      - NO parameter tuning allowed
+      - Report final metrics
+    
+    This avoids overfitting and provides honest performance estimates.
+    """
+    
+    def __init__(self,
+                 train_start: str = "2022-01-01",
+                 train_end: str = "2023-12-31",
+                 val_start: str = "2024-01-01",
+                 val_end: str = "2024-06-30",
+                 test_start: str = "2024-07-01",
+                 test_end: str = "2025-12-03",
+                 notional: float = 100000):
+        """
+        Initialize train/validation/test engine.
+        
+        Parameters
+        ----------
+        train_start, train_end : str
+            Training period dates
+        val_start, val_end : str
+            Validation period dates
+        test_start, test_end : str
+            Test period dates
+        notional : float
+            Notional value
+        """
+        self.train_start = train_start
+        self.train_end = train_end
+        self.val_start = val_start
+        self.val_end = val_end
+        self.test_start = test_start
+        self.test_end = test_end
+        self.notional = notional
+        
+        # Data
+        self.full_df = None
+        self.train_df = None
+        self.val_df = None
+        self.test_df = None
+        
+        # Best hyperparameters (tuned on validation)
+        self.best_lambda = 0.94
+        self.best_risk_aversion = 0.0
+        
+        # Results
+        self.train_results = {}
+        self.val_results = {}
+        self.test_results = {}
+        self.tuning_results = []
+        
+        # Final test engine
+        self.test_engine = None
+    
+    def load_data(self):
+        """Load data for all periods."""
+        print("=" * 60)
+        print("LOADING DATA FOR TRAIN/VALIDATION/TEST SPLIT")
+        print("=" * 60)
+        
+        # Load full dataset
+        self.full_df = load_all_data(self.train_start, self.test_end)
+        
+        # Split into periods
+        self.train_df = self.full_df[
+            (self.full_df.index >= self.train_start) & 
+            (self.full_df.index <= self.train_end)
+        ].copy()
+        
+        self.val_df = self.full_df[
+            (self.full_df.index >= self.val_start) & 
+            (self.full_df.index <= self.val_end)
+        ].copy()
+        
+        self.test_df = self.full_df[
+            (self.full_df.index >= self.test_start) & 
+            (self.full_df.index <= self.test_end)
+        ].copy()
+        
+        print(f"\nData Split Summary:")
+        print(f"  Training:   {len(self.train_df):4d} days ({self.train_start} to {self.train_end})")
+        print(f"  Validation: {len(self.val_df):4d} days ({self.val_start} to {self.val_end})")
+        print(f"  Test:       {len(self.test_df):4d} days ({self.test_start} to {self.test_end})")
+        print(f"  Total:      {len(self.full_df):4d} days")
+        
+        return self
+    
+    def _run_backtest_on_period(self, df: pd.DataFrame, 
+                                 ewma_lambda: float = 0.94,
+                                 risk_aversion: float = 0.0,
+                                 init_periods: int = 20) -> Dict:
+        """
+        Run backtest on a specific period with given hyperparameters.
+        
+        Returns dict with performance metrics.
+        """
+        from ._2_Covariance_Estimation import EWMACovarianceEstimator
+        
+        if len(df) < init_periods + 10:
+            return {'sharpe_m1': np.nan, 'sharpe_m2': np.nan, 'sharpe_m3': np.nan}
+        
+        # Calculate returns
+        asset_returns = calculate_hedge_asset_returns(df)
+        
+        # Custom EWMA covariance with specified lambda
+        risky_returns = asset_returns[['r_spot_asset', 'r_futures_asset']].copy()
+        estimator = EWMACovarianceEstimator(lambda_=ewma_lambda, n_assets=2)
+        init_data = risky_returns.iloc[:init_periods].values
+        estimator.initialize(init_data)
+        
+        cov_2x2_series = [estimator.current_cov.copy()]
+        for i in range(init_periods, len(risky_returns)):
+            returns_t = risky_returns.iloc[i].values
+            estimator.update(returns_t)
+            cov_2x2_series.append(estimator.current_cov.copy())
+        
+        # Expand to 3x3
+        cov_series = []
+        rf_var = 1e-10
+        for cov_2x2 in cov_2x2_series:
+            cov_3x3 = np.zeros((3, 3))
+            cov_3x3[:2, :2] = cov_2x2
+            cov_3x3[2, 2] = rf_var
+            cov_series.append(cov_3x3)
+        
+        # Strangle P&L
+        strangle_pnl = calculate_strangle_pnl(df, self.notional)
+        
+        # Align indices
+        common_index = strangle_pnl.index.intersection(asset_returns.index)
+        if len(common_index) < 20:
+            return {'sharpe_m1': np.nan, 'sharpe_m2': np.nan, 'sharpe_m3': np.nan}
+        
+        strangle_pnl = strangle_pnl.loc[common_index]
+        
+        # Run optimization
+        weights_list = []
+        for t, date in enumerate(common_index):
+            cov_idx = min(t + init_periods, len(cov_series) - 1)
+            cov = cov_series[cov_idx]
+            
+            delta_idx = df.index.get_loc(date)
+            net_delta = df['net_delta'].iloc[delta_idx]
+            
+            # M1: Simple delta hedge
+            m1_weights = compute_naive_hedge(net_delta)
+            
+            # M2: EWMA hedge
+            m2_weights = compute_ewma_hedge_weights(cov, net_delta)
+            
+            # M3: MV Optimal (with custom risk aversion)
+            from ._3_MV_Optimization import optimize_hedge_portfolio
+            m3_weights, _ = optimize_hedge_portfolio(cov, net_delta, risk_aversion=risk_aversion)
+            
+            weights_list.append({
+                'date': date,
+                'm1_w_spot': m1_weights[0], 'm1_w_futures': m1_weights[1], 'm1_w_cash': m1_weights[2],
+                'm2_w_spot': m2_weights[0], 'm2_w_futures': m2_weights[1], 'm2_w_cash': m2_weights[2],
+                'm3_w_spot': m3_weights[0], 'm3_w_futures': m3_weights[1], 'm3_w_cash': m3_weights[2],
+            })
+        
+        weights_df = pd.DataFrame(weights_list).set_index('date')
+        
+        # Calculate P&L for each method
+        hedge_pnl = calculate_hedge_pnl_three_methods(df.loc[common_index], weights_df, self.notional)
+        
+        # Combine with strangle P&L
+        pnl = pd.DataFrame(index=common_index)
+        pnl['m1_pnl'] = strangle_pnl['theta'] + strangle_pnl['gamma'] + strangle_pnl['vega'] + hedge_pnl['total_hedge_m1']
+        pnl['m2_pnl'] = strangle_pnl['theta'] + strangle_pnl['gamma'] + strangle_pnl['vega'] + hedge_pnl['total_hedge_m2']
+        pnl['m3_pnl'] = strangle_pnl['theta'] + strangle_pnl['gamma'] + strangle_pnl['vega'] + hedge_pnl['total_hedge_m3']
+        
+        # Calculate metrics
+        def calc_sharpe(daily_pnl):
+            if len(daily_pnl.dropna()) < 20:
+                return np.nan
+            mean_ret = daily_pnl.mean() / self.notional
+            std_ret = daily_pnl.std() / self.notional
+            if std_ret < 1e-10:
+                return 0.0
+            sharpe = (mean_ret - RISK_FREE_RATE_DAILY) / std_ret * np.sqrt(252)
+            return sharpe
+        
+        def calc_vol(daily_pnl):
+            if len(daily_pnl.dropna()) < 20:
+                return np.nan
+            return (daily_pnl.std() / self.notional) * np.sqrt(252)
+        
+        def calc_return(daily_pnl):
+            if len(daily_pnl.dropna()) < 20:
+                return np.nan
+            return (daily_pnl.mean() / self.notional) * 252
+        
+        def calc_max_dd(daily_pnl):
+            cum_pnl = daily_pnl.cumsum()
+            running_max = (self.notional + cum_pnl).cummax()
+            drawdown = (running_max - (self.notional + cum_pnl)) / running_max
+            return drawdown.max()
+        
+        return {
+            'sharpe_m1': calc_sharpe(pnl['m1_pnl']),
+            'sharpe_m2': calc_sharpe(pnl['m2_pnl']),
+            'sharpe_m3': calc_sharpe(pnl['m3_pnl']),
+            'vol_m1': calc_vol(pnl['m1_pnl']),
+            'vol_m2': calc_vol(pnl['m2_pnl']),
+            'vol_m3': calc_vol(pnl['m3_pnl']),
+            'return_m1': calc_return(pnl['m1_pnl']),
+            'return_m2': calc_return(pnl['m2_pnl']),
+            'return_m3': calc_return(pnl['m3_pnl']),
+            'max_dd_m1': calc_max_dd(pnl['m1_pnl']),
+            'max_dd_m2': calc_max_dd(pnl['m2_pnl']),
+            'max_dd_m3': calc_max_dd(pnl['m3_pnl']),
+            'pnl_df': pnl,
+            'weights_df': weights_df
+        }
+    
+    def train(self, init_periods: int = 20):
+        """
+        Phase 1: Training
+        
+        Calibrate models on training data.
+        Establishes baseline performance.
+        """
+        print("\n" + "=" * 60)
+        print("PHASE 1: TRAINING (2022-01-01 to 2023-12-31)")
+        print("=" * 60)
+        print("Calibrating models on training data...")
+        
+        self.train_results = self._run_backtest_on_period(
+            self.train_df, 
+            ewma_lambda=0.94,  # Initial lambda
+            risk_aversion=0.0,
+            init_periods=init_periods
+        )
+        
+        print(f"\nTraining Period Performance:")
+        print(f"  M1 (Delta Hedge): Sharpe = {self.train_results['sharpe_m1']:.2f}, Vol = {self.train_results['vol_m1']*100:.2f}%")
+        print(f"  M2 (EWMA Hedge):  Sharpe = {self.train_results['sharpe_m2']:.2f}, Vol = {self.train_results['vol_m2']*100:.2f}%")
+        print(f"  M3 (MV Optimal):  Sharpe = {self.train_results['sharpe_m3']:.2f}, Vol = {self.train_results['vol_m3']*100:.2f}%")
+        
+        return self
+    
+    def validate(self, 
+                 lambda_candidates: List[float] = [0.90, 0.92, 0.94, 0.96, 0.97],
+                 risk_aversion_candidates: List[float] = [0.0, 1.0, 2.0, 5.0, 10.0],
+                 init_periods: int = 20):
+        """
+        Phase 2: Validation
+        
+        Tune hyperparameters on validation data.
+        Select best lambda and risk_aversion based on M3 Sharpe ratio.
+        """
+        print("\n" + "=" * 60)
+        print("PHASE 2: VALIDATION (2024-01-01 to 2024-06-30)")
+        print("=" * 60)
+        print("Tuning hyperparameters on validation data...")
+        print(f"  Lambda candidates: {lambda_candidates}")
+        print(f"  Risk aversion candidates: {risk_aversion_candidates}")
+        
+        best_sharpe = -np.inf
+        self.tuning_results = []
+        
+        total_combinations = len(lambda_candidates) * len(risk_aversion_candidates)
+        current = 0
+        
+        for lam in lambda_candidates:
+            for ra in risk_aversion_candidates:
+                current += 1
+                
+                results = self._run_backtest_on_period(
+                    self.val_df,
+                    ewma_lambda=lam,
+                    risk_aversion=ra,
+                    init_periods=init_periods
+                )
+                
+                self.tuning_results.append({
+                    'lambda': lam,
+                    'risk_aversion': ra,
+                    'sharpe_m1': results['sharpe_m1'],
+                    'sharpe_m2': results['sharpe_m2'],
+                    'sharpe_m3': results['sharpe_m3'],
+                    'vol_m3': results['vol_m3']
+                })
+                
+                # Select best based on M3 Sharpe (our main strategy)
+                if not np.isnan(results['sharpe_m3']) and results['sharpe_m3'] > best_sharpe:
+                    best_sharpe = results['sharpe_m3']
+                    self.best_lambda = lam
+                    self.best_risk_aversion = ra
+                
+                if current % 5 == 0:
+                    print(f"  Progress: {current}/{total_combinations} combinations tested...")
+        
+        print(f"\n✓ Hyperparameter Tuning Complete!")
+        print(f"  Best Lambda: {self.best_lambda}")
+        print(f"  Best Risk Aversion: {self.best_risk_aversion}")
+        print(f"  Validation M3 Sharpe: {best_sharpe:.2f}")
+        
+        # Store validation results with best params
+        self.val_results = self._run_backtest_on_period(
+            self.val_df,
+            ewma_lambda=self.best_lambda,
+            risk_aversion=self.best_risk_aversion,
+            init_periods=init_periods
+        )
+        
+        print(f"\nValidation Period Performance (with tuned params):")
+        print(f"  M1 (Delta Hedge): Sharpe = {self.val_results['sharpe_m1']:.2f}")
+        print(f"  M2 (EWMA Hedge):  Sharpe = {self.val_results['sharpe_m2']:.2f}")
+        print(f"  M3 (MV Optimal):  Sharpe = {self.val_results['sharpe_m3']:.2f}")
+        
+        return self
+    
+    def test(self, init_periods: int = 20):
+        """
+        Phase 3: Testing
+        
+        Final out-of-sample evaluation on test data.
+        Uses hyperparameters tuned during validation.
+        NO PARAMETER CHANGES ALLOWED IN THIS PHASE.
+        """
+        print("\n" + "=" * 60)
+        print("PHASE 3: TESTING (2024-07-01 to 2025-12-03)")
+        print("=" * 60)
+        print("Running final out-of-sample evaluation...")
+        print(f"  Using tuned Lambda: {self.best_lambda}")
+        print(f"  Using tuned Risk Aversion: {self.best_risk_aversion}")
+        
+        self.test_results = self._run_backtest_on_period(
+            self.test_df,
+            ewma_lambda=self.best_lambda,
+            risk_aversion=self.best_risk_aversion,
+            init_periods=init_periods
+        )
+        
+        print(f"\n" + "=" * 60)
+        print("FINAL TEST RESULTS (Out-of-Sample)")
+        print("=" * 60)
+        
+        # Create summary table
+        print(f"\n{'Metric':<25} {'M1: Delta Hedge':>15} {'M2: EWMA Hedge':>15} {'M3: MV Optimal':>15}")
+        print("-" * 75)
+        print(f"{'Annualized Return':<25} {self.test_results['return_m1']*100:>14.2f}% {self.test_results['return_m2']*100:>14.2f}% {self.test_results['return_m3']*100:>14.2f}%")
+        print(f"{'Annualized Volatility':<25} {self.test_results['vol_m1']*100:>14.2f}% {self.test_results['vol_m2']*100:>14.2f}% {self.test_results['vol_m3']*100:>14.2f}%")
+        print(f"{'Sharpe Ratio':<25} {self.test_results['sharpe_m1']:>15.2f} {self.test_results['sharpe_m2']:>15.2f} {self.test_results['sharpe_m3']:>15.2f}")
+        print(f"{'Max Drawdown':<25} {self.test_results['max_dd_m1']*100:>14.2f}% {self.test_results['max_dd_m2']*100:>14.2f}% {self.test_results['max_dd_m3']*100:>14.2f}%")
+        
+        # Store for plotting
+        self.test_pnl = self.test_results.get('pnl_df')
+        self.test_weights = self.test_results.get('weights_df')
+        
+        return self
+    
+    def run_full_pipeline(self,
+                          lambda_candidates: List[float] = None,
+                          risk_aversion_candidates: List[float] = None,
+                          init_periods: int = 20):
+        """
+        Run the complete train/validation/test pipeline.
+        """
+        if lambda_candidates is None:
+            lambda_candidates = [0.90, 0.92, 0.94, 0.96, 0.97]
+        if risk_aversion_candidates is None:
+            risk_aversion_candidates = [0.0, 1.0, 2.0, 5.0, 10.0]
+        
+        self.load_data()
+        self.train(init_periods)
+        self.validate(lambda_candidates, risk_aversion_candidates, init_periods)
+        self.test(init_periods)
+        
+        return self
+    
+    def get_summary_table(self) -> pd.DataFrame:
+        """Get summary table comparing all periods."""
+        data = []
+        
+        if self.train_results:
+            data.append({
+                'Period': 'Training (2022-2023)',
+                'M1 Sharpe': self.train_results.get('sharpe_m1', np.nan),
+                'M2 Sharpe': self.train_results.get('sharpe_m2', np.nan),
+                'M3 Sharpe': self.train_results.get('sharpe_m3', np.nan),
+                'M3 Vol': self.train_results.get('vol_m3', np.nan),
+                'M3 Return': self.train_results.get('return_m3', np.nan),
+            })
+        
+        if self.val_results:
+            data.append({
+                'Period': 'Validation (2024 H1)',
+                'M1 Sharpe': self.val_results.get('sharpe_m1', np.nan),
+                'M2 Sharpe': self.val_results.get('sharpe_m2', np.nan),
+                'M3 Sharpe': self.val_results.get('sharpe_m3', np.nan),
+                'M3 Vol': self.val_results.get('vol_m3', np.nan),
+                'M3 Return': self.val_results.get('return_m3', np.nan),
+            })
+        
+        if self.test_results:
+            data.append({
+                'Period': 'Test (2024 H2 - 2025)',
+                'M1 Sharpe': self.test_results.get('sharpe_m1', np.nan),
+                'M2 Sharpe': self.test_results.get('sharpe_m2', np.nan),
+                'M3 Sharpe': self.test_results.get('sharpe_m3', np.nan),
+                'M3 Vol': self.test_results.get('vol_m3', np.nan),
+                'M3 Return': self.test_results.get('return_m3', np.nan),
+            })
+        
+        return pd.DataFrame(data)
+    
+    def get_tuning_results(self) -> pd.DataFrame:
+        """Get hyperparameter tuning results."""
+        return pd.DataFrame(self.tuning_results)
 
 
 # ============================================================================

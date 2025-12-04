@@ -304,6 +304,102 @@ def compute_ewma_covariance_series(
     return covariance_series
 
 
+def compute_hedge_asset_covariance(asset_returns: pd.DataFrame,
+                                    lambda_: float = EWMA_LAMBDA,
+                                    init_periods: int = 20) -> List[np.ndarray]:
+    """
+    Compute EWMA covariance for hedging assets (spot, futures, risk-free).
+    
+    This is used by Methodology 2 and Methodology 3.
+    
+    Parameters
+    ----------
+    asset_returns : pd.DataFrame
+        DataFrame with columns: ['r_spot_asset', 'r_futures_asset', 'r_rf']
+    lambda_ : float
+        EWMA decay factor
+    init_periods : int
+        Initialization period
+    
+    Returns
+    -------
+    List[np.ndarray]
+        Covariance matrices for each time period (3x3)
+    
+    Notes
+    -----
+    The 3x3 covariance matrix structure:
+    
+           | Spot   Futures  RF   |
+    Spot   | σ²_s   σ_sf     0    |
+    Futures| σ_sf   σ²_f     0    |
+    RF     | 0      0        ~0   |
+    
+    Risk-free has near-zero variance and zero correlation.
+    """
+    # For risk-free, variance is effectively zero
+    # Compute 2x2 for spot/futures, then expand
+    risky_returns = asset_returns[['r_spot_asset', 'r_futures_asset']].copy()
+    
+    n_obs = len(asset_returns)
+    cov_2x2_series = compute_ewma_covariance_series(risky_returns, lambda_, init_periods)
+    
+    # Expand to 3x3 with risk-free
+    cov_series = []
+    rf_var = 1e-10  # Near-zero variance for risk-free
+    
+    for cov_2x2 in cov_2x2_series:
+        cov_3x3 = np.zeros((3, 3))
+        cov_3x3[:2, :2] = cov_2x2
+        cov_3x3[2, 2] = rf_var
+        cov_series.append(cov_3x3)
+    
+    return cov_series
+
+
+def compute_ewma_hedge_weights(cov_matrix: np.ndarray, net_delta: float) -> np.ndarray:
+    """
+    Compute hedge weights using EWMA covariance (Methodology 2).
+    
+    Uses minimum-variance hedge ratio: h = cov(spot, futures) / var(futures)
+    
+    Parameters
+    ----------
+    cov_matrix : np.ndarray
+        3x3 covariance matrix [spot, futures, cash]
+    net_delta : float
+        Net delta of strangle position
+    
+    Returns
+    -------
+    np.ndarray
+        Hedge weights [spot, futures, cash]
+    
+    Notes
+    -----
+    Methodology 2: Uses EWMA covariance to compute minimum-variance hedge ratio.
+    This is the classic variance-minimizing hedge from RiskMetrics.
+    """
+    spot_var = cov_matrix[0, 0]
+    futures_var = cov_matrix[1, 1]
+    cov_spot_futures = cov_matrix[0, 1]
+    
+    # Minimum variance hedge ratio (adjusted by covariance)
+    if futures_var > 1e-10:
+        mv_hedge_ratio = cov_spot_futures / futures_var
+    else:
+        mv_hedge_ratio = 1.0
+    
+    # M2: Use covariance-adjusted hedge
+    m2_futures_weight = -net_delta * mv_hedge_ratio
+    
+    # Clamp to reasonable bounds
+    m2_futures_weight = np.clip(m2_futures_weight, -0.5, 0.5)
+    m2_cash_weight = 1.0 - abs(m2_futures_weight)
+    
+    return np.array([0.0, m2_futures_weight, m2_cash_weight])
+
+
 def compute_rolling_correlation(
     returns_df: pd.DataFrame,
     lambda_: float = EWMA_LAMBDA,

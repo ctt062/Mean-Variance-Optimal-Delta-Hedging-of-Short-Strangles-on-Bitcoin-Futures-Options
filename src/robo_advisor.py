@@ -21,7 +21,8 @@ from typing import Dict, Tuple, Optional
 from datetime import datetime
 
 from .data import RISK_FREE_RATE_DAILY, RISK_FREE_RATE_ANNUAL
-from .covariance import ensure_positive_definite
+# Import ensure_positive_definite from M3 module (it's also in covariance.py for backward compatibility)
+from ._3_MV_Optimization import ensure_positive_definite
 
 
 # ============================================================================

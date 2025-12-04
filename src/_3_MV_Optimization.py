@@ -43,6 +43,45 @@ RISK_FREE_RATE_DAILY = RISK_FREE_RATE_ANNUAL / 365
 
 
 # ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+def ensure_positive_definite(cov_matrix: np.ndarray,
+                              min_eigenvalue: float = 1e-6) -> np.ndarray:
+    """
+    Ensure covariance matrix is positive definite.
+    
+    Parameters
+    ----------
+    cov_matrix : np.ndarray
+        Input covariance matrix (may be near-singular)
+    min_eigenvalue : float
+        Minimum eigenvalue to enforce
+    
+    Returns
+    -------
+    np.ndarray
+        Positive definite covariance matrix
+    """
+    # Check symmetry
+    matrix = (cov_matrix + cov_matrix.T) / 2
+    
+    # Eigendecomposition
+    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+    
+    # Floor small/negative eigenvalues
+    eigenvalues = np.maximum(eigenvalues, min_eigenvalue)
+    
+    # Reconstruct
+    cov_fixed = eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
+    
+    # Ensure symmetry
+    cov_fixed = (cov_fixed + cov_fixed.T) / 2
+    
+    return cov_fixed
+
+
+# ============================================================================
 # MEAN-VARIANCE OPTIMIZATION
 # ============================================================================
 
@@ -186,6 +225,122 @@ def _ensure_positive_definite(matrix: np.ndarray,
 # NAIVE DELTA HEDGE (BASELINE COMPARISON)
 # ============================================================================
 
+def optimize_hedge_portfolio(cov_matrix: np.ndarray,
+                             net_delta: float,
+                             expected_returns: np.ndarray = None,
+                             risk_aversion: float = 0.0) -> Tuple[np.ndarray, Dict]:
+    """
+    Optimize hedge portfolio for short strangle (Methodology 3).
+    
+    This is the core function used by the backtest.
+    
+    Parameters
+    ----------
+    cov_matrix : np.ndarray
+        3x3 covariance matrix for [spot, futures, cash]
+    net_delta : float
+        Net delta of short strangle (typically negative, ~-0.05)
+    expected_returns : np.ndarray, optional
+        Expected returns for mean-variance optimization
+    risk_aversion : float
+        Risk aversion parameter (0 = pure min variance)
+    
+    Returns
+    -------
+    Tuple[np.ndarray, Dict]
+        Optimal weights and diagnostics dictionary
+    
+    Notes
+    -----
+    The optimization finds weights that:
+    1. Hedge the strangle's delta exposure
+    2. Minimize portfolio variance
+    3. (Optionally) maximize expected return given variance
+    
+    For delta-neutral hedging:
+    - If strangle has net_delta = -0.05
+    - We need portfolio delta = +0.05 to offset
+    - This means small long exposure to spot/futures
+    
+    From Lecture 5: With risk-free asset, optimal portfolio
+    is combination of tangency portfolio and risk-free.
+    """
+    n_assets = 3  # spot, futures, cash
+    
+    # Ensure positive definite
+    cov_matrix = ensure_positive_definite(cov_matrix)
+    
+    # Asset deltas: spot=1, futures=1, cash=0
+    asset_deltas = np.array([1.0, 1.0, 0.0])
+    
+    # Default expected returns (CAPM-based)
+    if expected_returns is None:
+        expected_returns = np.array([
+            RISK_FREE_RATE_DAILY + 0.10/365,  # Spot: rf + 10% premium
+            RISK_FREE_RATE_DAILY + 0.08/365,  # Futures: rf + 8% premium
+            RISK_FREE_RATE_DAILY              # Cash: rf
+        ])
+    
+    # Decision variable
+    w = cp.Variable(n_assets)
+    
+    # Objective: min variance - λ * expected return (if risk_aversion > 0)
+    portfolio_variance = cp.quad_form(w, cov_matrix)
+    portfolio_return = expected_returns @ w
+    
+    if risk_aversion > 0:
+        # Mean-variance utility: max(μ - (A/2)*σ²)
+        # Equivalent to: min((A/2)*σ² - μ)
+        objective = cp.Minimize(risk_aversion/2 * portfolio_variance - portfolio_return)
+    else:
+        # Pure minimum variance
+        objective = cp.Minimize(portfolio_variance)
+    
+    # Constraints
+    constraints = [
+        cp.sum(w) == 1,  # Fully invested
+        w >= -0.5,       # Allow small shorts for flexibility
+        w <= 1.5,        # Cap leverage
+        asset_deltas @ w == -net_delta  # Delta-neutral
+    ]
+    
+    # Solve
+    problem = cp.Problem(objective, constraints)
+    
+    try:
+        problem.solve(solver=cp.OSQP, verbose=False)
+        
+        if problem.status == 'optimal':
+            weights = w.value
+            
+            # Diagnostics
+            diagnostics = {
+                'status': 'optimal',
+                'variance': float(problem.value),
+                'volatility': float(np.sqrt(problem.value)),
+                'expected_return': float(expected_returns @ weights),
+                'sharpe': float((expected_returns @ weights - RISK_FREE_RATE_DAILY) / 
+                                (np.sqrt(problem.value) + 1e-10))
+            }
+            
+            return weights, diagnostics
+        else:
+            # Fallback: simple hedge (all in futures to match delta)
+            fallback_weights = np.array([0.0, -net_delta, 1 + net_delta])
+            fallback_weights = np.clip(fallback_weights, 0, 1)
+            fallback_weights /= fallback_weights.sum()
+            
+            return fallback_weights, {'status': 'fallback'}
+            
+    except Exception as e:
+        # Fallback on error
+        fallback_weights = np.array([0.0, -net_delta, 1 + net_delta])
+        fallback_weights = np.clip(fallback_weights, 0, 1)
+        fallback_weights /= fallback_weights.sum()
+        
+        return fallback_weights, {'status': 'error', 'message': str(e)}
+
+
 def compute_naive_delta_hedge(net_delta: float) -> Dict[str, float]:
     """
     Compute simple 1:1 delta hedge using futures only.
@@ -267,6 +422,88 @@ def compute_expected_returns(
 # ============================================================================
 # EFFICIENT FRONTIER
 # ============================================================================
+
+def compute_efficient_frontier_with_delta(cov_matrix: np.ndarray,
+                                          expected_returns: np.ndarray,
+                                          net_delta: float,
+                                          n_points: int = 30) -> pd.DataFrame:
+    """
+    Compute efficient frontier subject to delta-neutral constraint.
+    
+    Parameters
+    ----------
+    cov_matrix : np.ndarray
+        Covariance matrix for hedge assets
+    expected_returns : np.ndarray
+        Expected returns
+    net_delta : float
+        Strangle net delta to hedge
+    n_points : int
+        Number of frontier points
+    
+    Returns
+    -------
+    pd.DataFrame
+        Constrained efficient frontier
+    
+    Notes
+    -----
+    This frontier shows the risk-return tradeoff available
+    when we must maintain delta neutrality.
+    
+    The frontier will be "inside" the unconstrained frontier,
+    showing the cost of the hedging constraint.
+    """
+    n_assets = cov_matrix.shape[0]
+    asset_deltas = np.array([1.0, 1.0, 0.0])
+    
+    cov_matrix = ensure_positive_definite(cov_matrix)
+    
+    # Risk aversion range
+    risk_aversions = np.linspace(0.01, 100, n_points)
+    
+    frontier_data = []
+    
+    for A in risk_aversions:
+        w = cp.Variable(n_assets)
+        
+        portfolio_variance = cp.quad_form(w, cov_matrix)
+        portfolio_return = expected_returns @ w
+        
+        # Mean-variance utility
+        objective = cp.Maximize(portfolio_return - A/2 * portfolio_variance)
+        
+        constraints = [
+            cp.sum(w) == 1,
+            w >= -0.5,
+            w <= 1.5,
+            asset_deltas @ w == -net_delta
+        ]
+        
+        problem = cp.Problem(objective, constraints)
+        
+        try:
+            problem.solve(solver=cp.OSQP, verbose=False)
+            
+            if problem.status == 'optimal':
+                ret = expected_returns @ w.value
+                vol = np.sqrt(portfolio_variance.value)
+                
+                frontier_data.append({
+                    'risk_aversion': A,
+                    'return': ret,
+                    'volatility': vol,
+                    'sharpe': (ret - RISK_FREE_RATE_DAILY) / vol if vol > 0 else 0,
+                    'weights': w.value,
+                    'w_spot': w.value[0],
+                    'w_futures': w.value[1],
+                    'w_cash': w.value[2]
+                })
+        except:
+            continue
+    
+    return pd.DataFrame(frontier_data)
+
 
 def compute_efficient_frontier(
     cov_matrix: np.ndarray,
