@@ -6,20 +6,25 @@ Prof. Wei JIANG
 
 This module visualizes results for THREE METHODOLOGIES:
 
-M1: Strangle Only (Option Strategy - Lecture 6)
-   - Red color in all plots
-   - P&L from option Greeks only, no hedging
+METHODOLOGY 1: Option Strategy and Delta-Hedging (Lecture 6)
+   - File: 1_Option_Delta.py
+   - Blue color for Delta Hedge strategy
 
-M2: Delta Hedge (1:1 Futures - Lecture 6)  
-   - Blue color in all plots
-   - Simple delta-neutral hedge
+METHODOLOGY 2: Dynamic Covariance Estimation via EWMA (Lecture 7)
+   - File: 2_Covariance_Estimation.py
+   - Used internally by M1+M2+M3 strategy
 
-M3: MV Optimal (EWMA Lecture 7 + Markowitz Lecture 5)
-   - Green color in all plots
-   - Best risk-adjusted returns
+METHODOLOGY 3: Mean-Variance Optimal Portfolio Construction (Lecture 5)
+   - File: 3_MV_Optimization.py
+   - Green color for MV Optimal strategy
+
+Backtest Strategies Compared:
+- Strangle Only (Red): No hedging, baseline
+- M1: Delta Hedge (Blue): Methodology 1 with simple hedge
+- M1+M2+M3: MV Optimal (Green): All three methodologies combined
 
 Plots Generated:
-- Cumulative P&L curves (three methodologies)
+- Cumulative P&L curves
 - P&L distribution histograms
 - Efficient frontier (Markowitz)
 - Rolling volatility comparison
@@ -40,17 +45,17 @@ warnings.filterwarnings('ignore')
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("husl")
 
-# Custom color scheme - Mapped to 3 Methodologies
-# Method 1: Option Strategy (Short Strangle) - Red
-# Method 2: Delta-Hedging (1:1 Futures) - Blue
-# Method 3: MV Optimal (EWMA + Markowitz) - Green
+# Custom color scheme - M1, M2, M3 Methodologies
+# M1: Delta Hedge (Lecture 6) - Red
+# M2: EWMA Hedge (Lecture 7) - Blue
+# M3: MV Optimal (Lecture 5) - Green
 COLORS = {
-    'method1': '#e74c3c',        # Red - Strangle Only
-    'method2': '#3498db',        # Blue - Simple Delta Hedge
-    'method3': '#2ecc71',        # Green - MV Optimal (EWMA+Markowitz)
-    'unhedged': '#e74c3c',       # Alias for method1
-    'naive': '#3498db',          # Alias for method2
-    'mv_optimal': '#2ecc71',     # Alias for method3
+    'm1': '#e74c3c',             # Red - M1: Delta Hedge
+    'm2': '#3498db',             # Blue - M2: EWMA Hedge
+    'm3': '#2ecc71',             # Green - M3: MV Optimal
+    'unhedged': '#95a5a6',       # Gray - Unhedged (if needed)
+    'naive': '#e74c3c',          # Alias for M1
+    'mv_optimal': '#2ecc71',     # Alias for M3
     'spot': '#f39c12',           # Orange
     'futures': '#9b59b6',        # Purple
     'cash': '#1abc9c',           # Teal
@@ -58,11 +63,11 @@ COLORS = {
     'highlight': '#e67e22'       # Bright orange
 }
 
-# Method names for plot legends
-METHOD_NAMES = {
-    'method1': 'M1: Strangle Only\n(Option Greeks)',
-    'method2': 'M2: Delta Hedge\n(1:1 Futures)',
-    'method3': 'M3: MV Optimal\n(EWMA + Markowitz)'
+# Strategy names for plot legends
+STRATEGY_NAMES = {
+    'm1': 'M1: Delta Hedge\n(Lecture 6)',
+    'm2': 'M2: EWMA Hedge\n(Lecture 7)',
+    'm3': 'M3: MV Optimal\n(Lecture 5)'
 }
 
 
@@ -71,11 +76,11 @@ METHOD_NAMES = {
 # ============================================================================
 
 def plot_cumulative_pnl(pnl_history: pd.DataFrame,
-                        title: str = "Cumulative P&L: Three Methodology Comparison",
+                        title: str = "Cumulative P&L: M1 vs M2 vs M3",
                         figsize: tuple = (14, 8),
                         save_path: str = None) -> plt.Figure:
     """
-    Plot cumulative P&L for all three methodologies.
+    Plot cumulative P&L comparing three methodologies (M1, M2, M3).
     
     Parameters
     ----------
@@ -96,22 +101,22 @@ def plot_cumulative_pnl(pnl_history: pd.DataFrame,
     Notes
     -----
     Compares three methodologies:
-    - M1: Short Strangle Only (Option Strategy - Lecture 6)
-    - M2: Delta Hedge with 1:1 Futures (Delta-Hedging - Lecture 6)
-    - M3: MV Optimal with EWMA Covariance (Lecture 7) + Markowitz (Lecture 5)
+    - M1: Delta Hedge (Lecture 6) - Simple 1:1 futures hedge
+    - M2: EWMA Hedge (Lecture 7) - Volatility-adjusted hedge
+    - M3: MV Optimal (Lecture 5) - Full Markowitz optimization
     """
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot each methodology
-    ax.plot(pnl_history.index, pnl_history['cum_unhedged'], 
-            color=COLORS['method1'], linewidth=2, 
-            label='M1: Strangle Only (Option Greeks)', alpha=0.8)
-    ax.plot(pnl_history.index, pnl_history['cum_naive_hedged'], 
-            color=COLORS['method2'], linewidth=2, 
-            label='M2: Delta Hedge (1:1 Futures)', alpha=0.8)
-    ax.plot(pnl_history.index, pnl_history['cum_mv_hedged'], 
-            color=COLORS['method3'], linewidth=2.5, 
-            label='M3: MV Optimal (EWMA + Markowitz)', alpha=0.9)
+    # Plot M1, M2, M3
+    ax.plot(pnl_history.index, pnl_history['cum_m1'], 
+            color=COLORS['m1'], linewidth=2, 
+            label='M1: Delta Hedge (Lecture 6)', alpha=0.8)
+    ax.plot(pnl_history.index, pnl_history['cum_m2'], 
+            color=COLORS['m2'], linewidth=2, 
+            label='M2: EWMA Hedge (Lecture 7)', alpha=0.8)
+    ax.plot(pnl_history.index, pnl_history['cum_m3'], 
+            color=COLORS['m3'], linewidth=2.5, 
+            label='M3: MV Optimal (Lecture 5)', alpha=0.9)
     
     # Add zero line
     ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
@@ -160,11 +165,11 @@ def plot_pnl_distribution(pnl_history: pd.DataFrame,
     """
     fig, axes = plt.subplots(1, 3, figsize=figsize)
     
-    # Three methodologies
+    # Three methodologies: M1, M2, M3
     strategies = [
-        ('pnl_unhedged', 'M1: Strangle Only\n(Option Greeks)', COLORS['method1']),
-        ('pnl_naive_hedged', 'M2: Delta Hedge\n(1:1 Futures)', COLORS['method2']),
-        ('pnl_mv_hedged', 'M3: MV Optimal\n(EWMA+Markowitz)', COLORS['method3'])
+        ('pnl_m1', 'M1: Delta Hedge\n(Lecture 6)', COLORS['m1']),
+        ('pnl_m2', 'M2: EWMA Hedge\n(Lecture 7)', COLORS['m2']),
+        ('pnl_m3', 'M3: MV Optimal\n(Lecture 5)', COLORS['m3'])
     ]
     
     for ax, (col, name, color) in zip(axes, strategies):
@@ -188,7 +193,7 @@ def plot_pnl_distribution(pnl_history: pd.DataFrame,
         ax.set_xlabel('Daily P&L ($)', fontsize=10)
         ax.legend(fontsize=8)
     
-    plt.suptitle('Daily P&L Distribution: Three Methodologies', fontsize=13, fontweight='bold', y=1.02)
+    plt.suptitle('Daily P&L Distribution: M1 vs M2 vs M3', fontsize=13, fontweight='bold', y=1.02)
     plt.tight_layout()
     
     if save_path:
@@ -274,10 +279,10 @@ def plot_efficient_frontier(frontier_df: pd.DataFrame,
 # ============================================================================
 
 def plot_weight_evolution(weights_history: pd.DataFrame,
-                          figsize: tuple = (14, 6),
+                          figsize: tuple = (14, 9),
                           save_path: str = None) -> plt.Figure:
     """
-    Plot evolution of portfolio weights over time.
+    Plot evolution of portfolio weights over time for M1, M2, M3.
     
     Parameters
     ----------
@@ -293,37 +298,52 @@ def plot_weight_evolution(weights_history: pd.DataFrame,
     plt.Figure
         Matplotlib figure object
     """
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
     
-    # MV Optimal weights
+    # M1: Delta Hedge weights
     ax1 = axes[0]
     ax1.stackplot(weights_history.index,
-                  weights_history['mv_w_spot'],
-                  weights_history['mv_w_futures'],
-                  weights_history['mv_w_cash'],
+                  weights_history['m1_w_spot'].abs(),
+                  weights_history['m1_w_futures'].abs(),
+                  weights_history['m1_w_cash'].abs(),
                   labels=['Spot', 'Futures', 'Cash'],
                   colors=[COLORS['spot'], COLORS['futures'], COLORS['cash']],
                   alpha=0.8)
     ax1.set_ylabel('Weight', fontsize=11)
-    ax1.set_title('MV Optimal Hedge Weights', fontsize=12, fontweight='bold')
+    ax1.set_title('M1: Delta Hedge Weights (Lecture 6)', fontsize=12, fontweight='bold')
     ax1.legend(loc='upper right', fontsize=9)
-    ax1.set_ylim(0, 1)
+    ax1.set_ylim(0, 1.1)
     
-    # Naive weights
+    # M2: EWMA Hedge weights
     ax2 = axes[1]
     ax2.stackplot(weights_history.index,
-                  weights_history['naive_w_spot'],
-                  weights_history['naive_w_futures'],
-                  weights_history['naive_w_cash'],
+                  weights_history['m2_w_spot'].abs(),
+                  weights_history['m2_w_futures'].abs(),
+                  weights_history['m2_w_cash'].abs(),
                   labels=['Spot', 'Futures', 'Cash'],
                   colors=[COLORS['spot'], COLORS['futures'], COLORS['cash']],
                   alpha=0.8)
     ax2.set_ylabel('Weight', fontsize=11)
-    ax2.set_xlabel('Date', fontsize=11)
-    ax2.set_title('Naive Hedge Weights', fontsize=12, fontweight='bold')
+    ax2.set_title('M2: EWMA Hedge Weights (Lecture 7)', fontsize=12, fontweight='bold')
     ax2.legend(loc='upper right', fontsize=9)
-    ax2.set_ylim(0, 1)
+    ax2.set_ylim(0, 1.1)
     
+    # M3: MV Optimal weights
+    ax3 = axes[2]
+    ax3.stackplot(weights_history.index,
+                  weights_history['m3_w_spot'].abs(),
+                  weights_history['m3_w_futures'].abs(),
+                  weights_history['m3_w_cash'].abs(),
+                  labels=['Spot', 'Futures', 'Cash'],
+                  colors=[COLORS['spot'], COLORS['futures'], COLORS['cash']],
+                  alpha=0.8)
+    ax3.set_ylabel('Weight', fontsize=11)
+    ax3.set_xlabel('Date', fontsize=11)
+    ax3.set_title('M3: MV Optimal Weights (Lecture 5)', fontsize=12, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=9)
+    ax3.set_ylim(0, 1.1)
+    
+    plt.suptitle('Hedge Weight Evolution: M1 vs M2 vs M3', fontsize=14, fontweight='bold', y=1.02)
     plt.xticks(rotation=45)
     plt.tight_layout()
     
@@ -362,21 +382,21 @@ def plot_rolling_volatility(pnl_history: pd.DataFrame,
     """
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Calculate rolling volatility (annualized)
-    roll_vol_unhedged = pnl_history['ret_unhedged'].rolling(window).std() * np.sqrt(365) * 100
-    roll_vol_naive = pnl_history['ret_naive_hedged'].rolling(window).std() * np.sqrt(365) * 100
-    roll_vol_mv = pnl_history['ret_mv_hedged'].rolling(window).std() * np.sqrt(365) * 100
+    # Calculate rolling volatility for M1, M2, M3 (annualized)
+    roll_vol_m1 = pnl_history['ret_m1'].rolling(window).std() * np.sqrt(365) * 100
+    roll_vol_m2 = pnl_history['ret_m2'].rolling(window).std() * np.sqrt(365) * 100
+    roll_vol_m3 = pnl_history['ret_m3'].rolling(window).std() * np.sqrt(365) * 100
     
-    ax.plot(pnl_history.index, roll_vol_unhedged, 
-            color=COLORS['method1'], linewidth=1.5, label='M1: Strangle Only', alpha=0.8)
-    ax.plot(pnl_history.index, roll_vol_naive, 
-            color=COLORS['method2'], linewidth=1.5, label='M2: Delta Hedge', alpha=0.8)
-    ax.plot(pnl_history.index, roll_vol_mv, 
-            color=COLORS['method3'], linewidth=2, label='M3: MV Optimal', alpha=0.9)
+    ax.plot(pnl_history.index, roll_vol_m1, 
+            color=COLORS['m1'], linewidth=1.5, label='M1: Delta Hedge', alpha=0.8)
+    ax.plot(pnl_history.index, roll_vol_m2, 
+            color=COLORS['m2'], linewidth=1.5, label='M2: EWMA Hedge', alpha=0.8)
+    ax.plot(pnl_history.index, roll_vol_m3, 
+            color=COLORS['m3'], linewidth=2, label='M3: MV Optimal', alpha=0.9)
     
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel(f'{window}-Day Rolling Volatility (% annualized)', fontsize=12)
-    ax.set_title(f'Rolling Volatility: Three Methodologies ({window}-Day Window)', 
+    ax.set_title(f'Rolling Volatility: M1 vs M2 vs M3 ({window}-Day Window)', 
                  fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=11)
     ax.grid(True, alpha=0.3)
@@ -396,9 +416,10 @@ def plot_rolling_volatility(pnl_history: pd.DataFrame,
 
 def plot_drawdowns(pnl_history: pd.DataFrame,
                    figsize: tuple = (14, 6),
-                   save_path: str = None) -> plt.Figure:
+                   save_path: str = None,
+                   initial_capital: float = 100000) -> plt.Figure:
     """
-    Plot drawdown analysis for each strategy.
+    Plot drawdown analysis (as percentage) for each strategy.
     
     Parameters
     ----------
@@ -408,6 +429,8 @@ def plot_drawdowns(pnl_history: pd.DataFrame,
         Figure size
     save_path : str, optional
         Path to save figure
+    initial_capital : float
+        Initial capital for percentage calculation
     
     Returns
     -------
@@ -417,22 +440,29 @@ def plot_drawdowns(pnl_history: pd.DataFrame,
     fig, ax = plt.subplots(figsize=figsize)
     
     for col, name, color in [
-        ('cum_unhedged', 'M1: Strangle Only', COLORS['method1']),
-        ('cum_naive_hedged', 'M2: Delta Hedge', COLORS['method2']),
-        ('cum_mv_hedged', 'M3: MV Optimal', COLORS['method3'])
+        ('cum_m1', 'M1: Delta Hedge', COLORS['m1']),
+        ('cum_m2', 'M2: EWMA Hedge', COLORS['m2']),
+        ('cum_m3', 'M3: MV Optimal', COLORS['m3'])
     ]:
         cum_pnl = pnl_history[col]
-        running_max = cum_pnl.cummax()
-        drawdown = (running_max - cum_pnl)
+        # Calculate portfolio value (initial + cumulative P&L)
+        portfolio_value = initial_capital + cum_pnl
+        # Running maximum of portfolio value
+        running_max = portfolio_value.cummax()
+        # Drawdown as percentage
+        drawdown_pct = (running_max - portfolio_value) / running_max * 100
         
-        ax.fill_between(pnl_history.index, 0, -drawdown, 
+        ax.fill_between(pnl_history.index, 0, -drawdown_pct, 
                        color=color, alpha=0.4, label=name)
     
     ax.set_xlabel('Date', fontsize=12)
-    ax.set_ylabel('Drawdown ($)', fontsize=12)
-    ax.set_title('Drawdown Analysis: Three Methodologies', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Drawdown (%)', fontsize=12)
+    ax.set_title('Drawdown Analysis: M1 vs M2 vs M3', fontsize=14, fontweight='bold')
     ax.legend(loc='lower right', fontsize=11)
     ax.grid(True, alpha=0.3)
+    
+    # Format y-axis as percentage
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{-x:.1f}%'))
     
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -469,12 +499,12 @@ def plot_metrics_comparison(metrics_df: pd.DataFrame,
     """
     fig, axes = plt.subplots(2, 2, figsize=figsize)
     
-    # Three methodologies with short labels for x-axis
-    strategies = ['M1:\nStrangle', 'M2:\nDelta Hedge', 'M3:\nMV Optimal']
-    colors = [COLORS['method1'], COLORS['method2'], COLORS['method3']]
+    # M1, M2, M3 labels for x-axis
+    strategies = ['M1:\nDelta Hedge', 'M2:\nEWMA Hedge', 'M3:\nMV Optimal']
+    colors = [COLORS['m1'], COLORS['m2'], COLORS['m3']]
     
-    # Column names in metrics_df (updated to match new naming)
-    col_names = ['M1: Strangle Only', 'M2: Delta Hedge', 'M3: MV Optimal']
+    # Column names in metrics_df
+    col_names = ['M1: Delta Hedge', 'M2: EWMA Hedge', 'M3: MV Optimal']
     
     # Convert string percentages to floats if needed
     def parse_pct(val):
@@ -482,17 +512,12 @@ def plot_metrics_comparison(metrics_df: pd.DataFrame,
             return float(val.strip('%')) / 100
         return val
     
-    # Helper to get value with fallback for old column names
+    # Helper to get value
     def get_metric(metric_name, col_idx):
         try:
             return metrics_df[metrics_df['Metric'] == metric_name][col_names[col_idx]].values[0]
         except (KeyError, IndexError):
-            # Fallback to old column names
-            old_names = ['Unhedged', 'Naive Hedge', 'MV Optimal']
-            try:
-                return metrics_df[metrics_df['Metric'] == metric_name][old_names[col_idx]].values[0]
-            except:
-                return 0
+            return 0
     
     # Sharpe Ratio
     ax1 = axes[0, 0]
@@ -523,7 +548,7 @@ def plot_metrics_comparison(metrics_df: pd.DataFrame,
     ax4.set_ylabel('Win Rate (%)', fontsize=11)
     ax4.set_title('Daily Win Rate', fontsize=12, fontweight='bold')
     
-    plt.suptitle('Performance Metrics: Three Methodologies', fontsize=14, fontweight='bold', y=1.02)
+    plt.suptitle('Performance Metrics: M1 vs M2 vs M3', fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
     
     if save_path:
