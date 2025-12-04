@@ -1,16 +1,23 @@
 """
-EWMA Covariance Estimation Module
-=================================
+EWMA Covariance Estimation Module (METHODOLOGY 2 Component)
+============================================================
 HKUST IEDA3330 Introduction to Financial Engineering - Fall 2025
 Prof. Wei JIANG
 
-This module implements:
+This module implements METHODOLOGY 2 from Lecture 7: Basic Risk Management
+
+Dynamic Covariance Estimation via EWMA:
 - EWMA (Exponentially Weighted Moving Average) covariance estimation
-- RiskMetrics methodology with λ = 0.94
-- 3x3 covariance matrix for [r_spot, r_basis, dvol_chg]
+- RiskMetrics methodology with λ = 0.94 (industry standard)
+- 3x3 time-varying covariance matrix for [r_spot, r_basis, dvol_chg]
+
+Update Formula:
+  σ_ij,t = λ * σ_ij,{t-1} + (1-λ) * r_i,{t-1} * r_j,{t-1}
+
+This feeds into METHODOLOGY 3 (M3): MV Optimal Portfolio Construction.
 
 References:
-- Lecture 4: Covariance estimation for Mean-Variance Analysis
+- Lecture 7: Basic Risk Management (EWMA Covariance)
 - RiskMetrics Technical Document (J.P. Morgan, 1996)
 """
 

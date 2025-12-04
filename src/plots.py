@@ -4,14 +4,27 @@ Visualization Module
 HKUST IEDA3330 Introduction to Financial Engineering - Fall 2025
 Prof. Wei JIANG
 
-This module creates:
-- Cumulative P&L curves
-- Efficient frontier plots
-- Performance comparison charts
-- Risk metrics visualization
+This module visualizes results for THREE METHODOLOGIES:
 
-References:
-- Lecture 4: Efficient frontier visualization
+M1: Strangle Only (Option Strategy - Lecture 6)
+   - Red color in all plots
+   - P&L from option Greeks only, no hedging
+
+M2: Delta Hedge (1:1 Futures - Lecture 6)  
+   - Blue color in all plots
+   - Simple delta-neutral hedge
+
+M3: MV Optimal (EWMA Lecture 7 + Markowitz Lecture 5)
+   - Green color in all plots
+   - Best risk-adjusted returns
+
+Plots Generated:
+- Cumulative P&L curves (three methodologies)
+- P&L distribution histograms
+- Efficient frontier (Markowitz)
+- Rolling volatility comparison
+- Drawdown analysis
+- Performance metrics bar charts
 """
 
 import pandas as pd
@@ -27,16 +40,29 @@ warnings.filterwarnings('ignore')
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("husl")
 
-# Custom color scheme
+# Custom color scheme - Mapped to 3 Methodologies
+# Method 1: Option Strategy (Short Strangle) - Red
+# Method 2: Delta-Hedging (1:1 Futures) - Blue
+# Method 3: MV Optimal (EWMA + Markowitz) - Green
 COLORS = {
-    'unhedged': '#e74c3c',      # Red
-    'naive': '#3498db',          # Blue
-    'mv_optimal': '#2ecc71',     # Green
+    'method1': '#e74c3c',        # Red - Strangle Only
+    'method2': '#3498db',        # Blue - Simple Delta Hedge
+    'method3': '#2ecc71',        # Green - MV Optimal (EWMA+Markowitz)
+    'unhedged': '#e74c3c',       # Alias for method1
+    'naive': '#3498db',          # Alias for method2
+    'mv_optimal': '#2ecc71',     # Alias for method3
     'spot': '#f39c12',           # Orange
     'futures': '#9b59b6',        # Purple
     'cash': '#1abc9c',           # Teal
     'frontier': '#34495e',       # Dark gray
     'highlight': '#e67e22'       # Bright orange
+}
+
+# Method names for plot legends
+METHOD_NAMES = {
+    'method1': 'M1: Strangle Only\n(Option Greeks)',
+    'method2': 'M2: Delta Hedge\n(1:1 Futures)',
+    'method3': 'M3: MV Optimal\n(EWMA + Markowitz)'
 }
 
 
@@ -45,11 +71,11 @@ COLORS = {
 # ============================================================================
 
 def plot_cumulative_pnl(pnl_history: pd.DataFrame,
-                        title: str = "Cumulative P&L: Hedging Strategy Comparison",
+                        title: str = "Cumulative P&L: Three Methodology Comparison",
                         figsize: tuple = (14, 8),
                         save_path: str = None) -> plt.Figure:
     """
-    Plot cumulative P&L for all strategies.
+    Plot cumulative P&L for all three methodologies.
     
     Parameters
     ----------
@@ -69,18 +95,23 @@ def plot_cumulative_pnl(pnl_history: pd.DataFrame,
     
     Notes
     -----
-    This is the main visualization for comparing hedging effectiveness.
-    Lower variance in cumulative P&L indicates better hedging.
+    Compares three methodologies:
+    - M1: Short Strangle Only (Option Strategy - Lecture 6)
+    - M2: Delta Hedge with 1:1 Futures (Delta-Hedging - Lecture 6)
+    - M3: MV Optimal with EWMA Covariance (Lecture 7) + Markowitz (Lecture 5)
     """
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot each strategy
+    # Plot each methodology
     ax.plot(pnl_history.index, pnl_history['cum_unhedged'], 
-            color=COLORS['unhedged'], linewidth=2, label='Unhedged', alpha=0.8)
+            color=COLORS['method1'], linewidth=2, 
+            label='M1: Strangle Only (Option Greeks)', alpha=0.8)
     ax.plot(pnl_history.index, pnl_history['cum_naive_hedged'], 
-            color=COLORS['naive'], linewidth=2, label='Naive Hedge (1:1 Futures)', alpha=0.8)
+            color=COLORS['method2'], linewidth=2, 
+            label='M2: Delta Hedge (1:1 Futures)', alpha=0.8)
     ax.plot(pnl_history.index, pnl_history['cum_mv_hedged'], 
-            color=COLORS['mv_optimal'], linewidth=2.5, label='MV Optimal Hedge', alpha=0.9)
+            color=COLORS['method3'], linewidth=2.5, 
+            label='M3: MV Optimal (EWMA + Markowitz)', alpha=0.9)
     
     # Add zero line
     ax.axhline(y=0, color='black', linestyle='--', alpha=0.3)
@@ -129,10 +160,11 @@ def plot_pnl_distribution(pnl_history: pd.DataFrame,
     """
     fig, axes = plt.subplots(1, 3, figsize=figsize)
     
+    # Three methodologies
     strategies = [
-        ('pnl_unhedged', 'Unhedged', COLORS['unhedged']),
-        ('pnl_naive_hedged', 'Naive Hedge', COLORS['naive']),
-        ('pnl_mv_hedged', 'MV Optimal', COLORS['mv_optimal'])
+        ('pnl_unhedged', 'M1: Strangle Only\n(Option Greeks)', COLORS['method1']),
+        ('pnl_naive_hedged', 'M2: Delta Hedge\n(1:1 Futures)', COLORS['method2']),
+        ('pnl_mv_hedged', 'M3: MV Optimal\n(EWMA+Markowitz)', COLORS['method3'])
     ]
     
     for ax, (col, name, color) in zip(axes, strategies):
@@ -156,7 +188,7 @@ def plot_pnl_distribution(pnl_history: pd.DataFrame,
         ax.set_xlabel('Daily P&L ($)', fontsize=10)
         ax.legend(fontsize=8)
     
-    plt.suptitle('Daily P&L Distribution by Strategy', fontsize=13, fontweight='bold', y=1.02)
+    plt.suptitle('Daily P&L Distribution: Three Methodologies', fontsize=13, fontweight='bold', y=1.02)
     plt.tight_layout()
     
     if save_path:
@@ -336,15 +368,15 @@ def plot_rolling_volatility(pnl_history: pd.DataFrame,
     roll_vol_mv = pnl_history['ret_mv_hedged'].rolling(window).std() * np.sqrt(365) * 100
     
     ax.plot(pnl_history.index, roll_vol_unhedged, 
-            color=COLORS['unhedged'], linewidth=1.5, label='Unhedged', alpha=0.8)
+            color=COLORS['method1'], linewidth=1.5, label='M1: Strangle Only', alpha=0.8)
     ax.plot(pnl_history.index, roll_vol_naive, 
-            color=COLORS['naive'], linewidth=1.5, label='Naive Hedge', alpha=0.8)
+            color=COLORS['method2'], linewidth=1.5, label='M2: Delta Hedge', alpha=0.8)
     ax.plot(pnl_history.index, roll_vol_mv, 
-            color=COLORS['mv_optimal'], linewidth=2, label='MV Optimal', alpha=0.9)
+            color=COLORS['method3'], linewidth=2, label='M3: MV Optimal', alpha=0.9)
     
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel(f'{window}-Day Rolling Volatility (% annualized)', fontsize=12)
-    ax.set_title(f'Rolling Volatility Comparison ({window}-Day Window)', 
+    ax.set_title(f'Rolling Volatility: Three Methodologies ({window}-Day Window)', 
                  fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=11)
     ax.grid(True, alpha=0.3)
@@ -385,9 +417,9 @@ def plot_drawdowns(pnl_history: pd.DataFrame,
     fig, ax = plt.subplots(figsize=figsize)
     
     for col, name, color in [
-        ('cum_unhedged', 'Unhedged', COLORS['unhedged']),
-        ('cum_naive_hedged', 'Naive Hedge', COLORS['naive']),
-        ('cum_mv_hedged', 'MV Optimal', COLORS['mv_optimal'])
+        ('cum_unhedged', 'M1: Strangle Only', COLORS['method1']),
+        ('cum_naive_hedged', 'M2: Delta Hedge', COLORS['method2']),
+        ('cum_mv_hedged', 'M3: MV Optimal', COLORS['method3'])
     ]:
         cum_pnl = pnl_history[col]
         running_max = cum_pnl.cummax()
@@ -398,7 +430,7 @@ def plot_drawdowns(pnl_history: pd.DataFrame,
     
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel('Drawdown ($)', fontsize=12)
-    ax.set_title('Drawdown Analysis by Strategy', fontsize=14, fontweight='bold')
+    ax.set_title('Drawdown Analysis: Three Methodologies', fontsize=14, fontweight='bold')
     ax.legend(loc='lower right', fontsize=11)
     ax.grid(True, alpha=0.3)
     
@@ -437,8 +469,12 @@ def plot_metrics_comparison(metrics_df: pd.DataFrame,
     """
     fig, axes = plt.subplots(2, 2, figsize=figsize)
     
-    strategies = ['Unhedged', 'Naive Hedge', 'MV Optimal']
-    colors = [COLORS['unhedged'], COLORS['naive'], COLORS['mv_optimal']]
+    # Three methodologies with short labels for x-axis
+    strategies = ['M1:\nStrangle', 'M2:\nDelta Hedge', 'M3:\nMV Optimal']
+    colors = [COLORS['method1'], COLORS['method2'], COLORS['method3']]
+    
+    # Column names in metrics_df (updated to match new naming)
+    col_names = ['M1: Strangle Only', 'M2: Delta Hedge', 'M3: MV Optimal']
     
     # Convert string percentages to floats if needed
     def parse_pct(val):
@@ -446,13 +482,21 @@ def plot_metrics_comparison(metrics_df: pd.DataFrame,
             return float(val.strip('%')) / 100
         return val
     
+    # Helper to get value with fallback for old column names
+    def get_metric(metric_name, col_idx):
+        try:
+            return metrics_df[metrics_df['Metric'] == metric_name][col_names[col_idx]].values[0]
+        except (KeyError, IndexError):
+            # Fallback to old column names
+            old_names = ['Unhedged', 'Naive Hedge', 'MV Optimal']
+            try:
+                return metrics_df[metrics_df['Metric'] == metric_name][old_names[col_idx]].values[0]
+            except:
+                return 0
+    
     # Sharpe Ratio
     ax1 = axes[0, 0]
-    sharpe_vals = [
-        float(metrics_df[metrics_df['Metric'] == 'Sharpe Ratio']['Unhedged'].values[0]),
-        float(metrics_df[metrics_df['Metric'] == 'Sharpe Ratio']['Naive Hedge'].values[0]),
-        float(metrics_df[metrics_df['Metric'] == 'Sharpe Ratio']['MV Optimal'].values[0])
-    ]
+    sharpe_vals = [float(get_metric('Sharpe Ratio', i)) for i in range(3)]
     ax1.bar(strategies, sharpe_vals, color=colors)
     ax1.set_ylabel('Sharpe Ratio', fontsize=11)
     ax1.set_title('Sharpe Ratio Comparison', fontsize=12, fontweight='bold')
@@ -460,38 +504,26 @@ def plot_metrics_comparison(metrics_df: pd.DataFrame,
     
     # Volatility
     ax2 = axes[0, 1]
-    vol_vals = [
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Annualized Volatility']['Unhedged'].values[0]),
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Annualized Volatility']['Naive Hedge'].values[0]),
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Annualized Volatility']['MV Optimal'].values[0])
-    ]
+    vol_vals = [parse_pct(get_metric('Annualized Volatility', i)) for i in range(3)]
     ax2.bar(strategies, [v * 100 for v in vol_vals], color=colors)
     ax2.set_ylabel('Volatility (%)', fontsize=11)
     ax2.set_title('Annualized Volatility', fontsize=12, fontweight='bold')
     
     # Max Drawdown
     ax3 = axes[1, 0]
-    dd_vals = [
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Max Drawdown']['Unhedged'].values[0]),
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Max Drawdown']['Naive Hedge'].values[0]),
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Max Drawdown']['MV Optimal'].values[0])
-    ]
+    dd_vals = [parse_pct(get_metric('Max Drawdown', i)) for i in range(3)]
     ax3.bar(strategies, [d * 100 for d in dd_vals], color=colors)
     ax3.set_ylabel('Max Drawdown (%)', fontsize=11)
     ax3.set_title('Maximum Drawdown', fontsize=12, fontweight='bold')
     
     # Win Rate
     ax4 = axes[1, 1]
-    wr_vals = [
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Win Rate']['Unhedged'].values[0]),
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Win Rate']['Naive Hedge'].values[0]),
-        parse_pct(metrics_df[metrics_df['Metric'] == 'Win Rate']['MV Optimal'].values[0])
-    ]
+    wr_vals = [parse_pct(get_metric('Win Rate', i)) for i in range(3)]
     ax4.bar(strategies, [w * 100 for w in wr_vals], color=colors)
     ax4.set_ylabel('Win Rate (%)', fontsize=11)
     ax4.set_title('Daily Win Rate', fontsize=12, fontweight='bold')
     
-    plt.suptitle('Performance Metrics Comparison', fontsize=14, fontweight='bold', y=1.02)
+    plt.suptitle('Performance Metrics: Three Methodologies', fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()
     
     if save_path:

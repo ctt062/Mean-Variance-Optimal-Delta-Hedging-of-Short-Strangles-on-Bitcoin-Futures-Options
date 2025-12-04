@@ -1,18 +1,28 @@
 """
-Mean-Variance Optimization Module
-=================================
+Mean-Variance Optimization Module (METHODOLOGY 3)
+=================================================
 HKUST IEDA3330 Introduction to Financial Engineering - Fall 2025
 Prof. Wei JIANG
 
-This module implements:
-- Mean-variance optimization using cvxpy
-- Delta-neutral portfolio construction
+This module implements METHODOLOGY 3 from Lecture 5: Capital Asset Pricing Model
+
+Mean-Variance Optimal Portfolio Construction:
+- Markowitz mean-variance optimization using cvxpy
 - Minimum variance hedge portfolio
-- Efficient frontier computation
+- Delta-neutrality constraint: asset_deltas @ w == -net_delta
+- Risk-free asset (USDT cash) included
+
+Optimization Problem:
+  minimize    w' Σ w           (portfolio variance)
+  subject to  Σ w_i = 1        (fully invested)
+              δ' w = -net_δ    (delta neutral)
+              w_i ≥ 0          (long only)
+
+This uses EWMA covariance from METHODOLOGY 2 (covariance.py).
 
 References:
-- Lecture 4: Mean-Variance Analysis (Markowitz)
-- Lecture 4: Two-fund separation with risk-free asset
+- Lecture 5: Mean-Variance Analysis (Markowitz Framework)
+- Lecture 5: Two-fund separation with risk-free asset
 """
 
 import numpy as np

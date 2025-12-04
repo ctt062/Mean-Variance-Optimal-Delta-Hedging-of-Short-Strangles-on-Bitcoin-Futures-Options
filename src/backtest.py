@@ -4,15 +4,25 @@ Backtesting Engine Module
 HKUST IEDA3330 Introduction to Financial Engineering - Fall 2025
 Prof. Wei JIANG
 
-This module implements:
-- Full backtest of hedging strategies (MV optimal vs naive vs unhedged)
-- P&L simulation for short strangles
-- Performance metrics: Sharpe, max drawdown, VaR
-- Sub-period analysis (e.g., FTX crash)
+This module implements backtesting for THREE METHODOLOGIES:
 
-References:
-- Lecture 4: Portfolio performance evaluation
-- Lecture 2: Risk measures (VaR, standard deviation)
+METHODOLOGY 1 (M1): Option Strategy - Strangle Only
+  - Lecture 6: Basic Derivative Theory
+  - P&L from Greeks: Theta (time decay), Gamma, Vega, Delta
+  - No hedging applied
+
+METHODOLOGY 2 (M2): Delta-Hedging with 1:1 Futures  
+  - Lecture 6: Basic Derivative Theory
+  - Simple 1:1 futures hedge to neutralize delta
+  
+METHODOLOGY 3 (M3): MV Optimal (EWMA + Markowitz)
+  - Lecture 5: Mean-Variance Portfolio Optimization
+  - Lecture 7: EWMA Covariance Estimation (λ=0.94)
+  - Optimal hedge weights under delta-neutrality constraint
+
+Performance Metrics:
+- Sharpe Ratio, Max Drawdown, VaR, Win Rate
+- Sub-period analysis (e.g., FTX crash Nov 2022)
 """
 
 import pandas as pd
@@ -577,6 +587,10 @@ class BacktestEngine:
         """
         metrics = self.calculate_metrics()
         
+        # Strategy names mapped to methodology:
+        # - Method 1: Option Strategy (Short Strangle) - "Strangle Only"
+        # - Method 2: Delta-Hedging (Simple 1:1 Futures) - "Delta Hedge"
+        # - Method 3: MV Optimal (EWMA Covariance + Markowitz) - "MV Optimal"
         summary = pd.DataFrame({
             'Metric': [
                 'Annualized Return',
@@ -586,7 +600,7 @@ class BacktestEngine:
                 '95% VaR',
                 'Win Rate'
             ],
-            'Unhedged': [
+            'M1: Strangle Only': [
                 f"{metrics.get('unhedged_annualized_return', 0):.2%}",
                 f"{metrics.get('unhedged_annualized_volatility', 0):.2%}",
                 f"{metrics.get('unhedged_sharpe_ratio', 0):.2f}",
@@ -594,7 +608,7 @@ class BacktestEngine:
                 f"{metrics.get('unhedged_var_95', 0):.4f}",
                 f"{metrics.get('unhedged_win_rate', 0):.2%}"
             ],
-            'Naive Hedge': [
+            'M2: Delta Hedge': [
                 f"{metrics.get('naive_hedged_annualized_return', 0):.2%}",
                 f"{metrics.get('naive_hedged_annualized_volatility', 0):.2%}",
                 f"{metrics.get('naive_hedged_sharpe_ratio', 0):.2f}",
@@ -602,7 +616,7 @@ class BacktestEngine:
                 f"{metrics.get('naive_hedged_var_95', 0):.4f}",
                 f"{metrics.get('naive_hedged_win_rate', 0):.2%}"
             ],
-            'MV Optimal': [
+            'M3: MV Optimal': [
                 f"{metrics.get('mv_hedged_annualized_return', 0):.2%}",
                 f"{metrics.get('mv_hedged_annualized_volatility', 0):.2%}",
                 f"{metrics.get('mv_hedged_sharpe_ratio', 0):.2f}",
@@ -630,26 +644,26 @@ class BacktestEngine:
         
         comparison = pd.DataFrame({
             'Period': subperiods_df['period'],
-            'Unhedged Std': subperiods_df.get('unhedged_annualized_volatility', 0),
-            'Naive Std': subperiods_df.get('naive_hedged_annualized_volatility', 0),
-            'MV Std': subperiods_df.get('mv_hedged_annualized_volatility', 0),
+            'M1: Strangle': subperiods_df.get('unhedged_annualized_volatility', 0),
+            'M2: Delta Hedge': subperiods_df.get('naive_hedged_annualized_volatility', 0),
+            'M3: MV Optimal': subperiods_df.get('mv_hedged_annualized_volatility', 0),
         })
         
         # Calculate improvement percentage
-        comparison['Improvement vs Unhedged'] = (
-            (comparison['Unhedged Std'] - comparison['MV Std']) / 
-            comparison['Unhedged Std'] * 100
+        comparison['M3 vs M1 Improvement'] = (
+            (comparison['M1: Strangle'] - comparison['M3: MV Optimal']) / 
+            comparison['M1: Strangle'] * 100
         )
-        comparison['Improvement vs Naive'] = (
-            (comparison['Naive Std'] - comparison['MV Std']) / 
-            comparison['Naive Std'] * 100
+        comparison['M3 vs M2 Improvement'] = (
+            (comparison['M2: Delta Hedge'] - comparison['M3: MV Optimal']) / 
+            comparison['M2: Delta Hedge'] * 100
         )
         
         # Format percentages
-        for col in ['Unhedged Std', 'Naive Std', 'MV Std']:
+        for col in ['M1: Strangle', 'M2: Delta Hedge', 'M3: MV Optimal']:
             comparison[col] = comparison[col].apply(lambda x: f"{x:.2%}" if pd.notna(x) else "N/A")
         
-        for col in ['Improvement vs Unhedged', 'Improvement vs Naive']:
+        for col in ['M3 vs M1 Improvement', 'M3 vs M2 Improvement']:
             comparison[col] = comparison[col].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
         
         return comparison

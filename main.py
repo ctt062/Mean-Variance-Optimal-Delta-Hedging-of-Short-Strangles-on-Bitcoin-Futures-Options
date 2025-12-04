@@ -7,28 +7,35 @@ Prof. Wei JIANG
 
 Main Execution Script
 ---------------------
-This script orchestrates the complete analysis:
-1. Data loading and preprocessing
-2. EWMA covariance estimation
-3. Mean-variance optimization
-4. Backtesting with daily rebalancing
-5. Performance comparison (Unhedged vs Naive vs MV Optimal)
-6. Visualization and reporting
-7. Robo-advisor demonstration
+This script orchestrates the complete analysis comparing THREE METHODOLOGIES:
+
+METHODOLOGY 1 (M1): Option Strategy - Short Strangle Only
+  - Lecture 6: Basic Derivative Theory
+  - P&L from option Greeks: Theta, Gamma, Vega, Delta
+  - No hedging applied
+
+METHODOLOGY 2 (M2): Delta-Hedging with 1:1 Futures
+  - Lecture 6: Basic Derivative Theory
+  - Simple delta-neutral hedge using futures
+  - 1:1 hedge ratio
+
+METHODOLOGY 3 (M3): MV Optimal with EWMA + Markowitz
+  - Lecture 5: Capital Asset Pricing Model (Mean-Variance)
+  - Lecture 7: Basic Risk Management (EWMA Covariance λ=0.94)
+  - Optimal hedge weights from quadratic optimization
 
 Project Overview:
 - Sell short strangles on Deribit BTC quarterly futures options (10% OTM)
 - Harvest volatility premium while minimizing P&L variance
-- Use mean-variance optimization for optimal hedge weights
-- Compare to naive 1:1 futures hedge and unhedged positions
+- Compare: M1 (Unhedged) vs M2 (Simple Hedge) vs M3 (MV Optimal)
 
 Authors: HKUST Financial Engineering Students
 Date: December 2025
 
 References:
-- Lecture 4: Mean-Variance Analysis (Markowitz)
-- Lecture 2: Risk measures and return calculations
-- Lecture 3: Option Greeks and hedging
+- Lecture 5: Mean-Variance Analysis (Markowitz Framework)
+- Lecture 6: Option Greeks and Delta-Hedging
+- Lecture 7: Risk Management (EWMA Covariance)
 """
 
 import os
@@ -157,16 +164,16 @@ def print_performance_summary(engine):
     
     # Final P&L
     print("\n" + "="*60)
-    print("FINAL CUMULATIVE P&L")
+    print("FINAL CUMULATIVE P&L (THREE METHODOLOGIES)")
     print("="*60)
     final_pnl = engine.pnl_history.iloc[-1]
-    print(f"  Unhedged:    ${final_pnl['cum_unhedged']:>12,.2f}")
-    print(f"  Naive Hedge: ${final_pnl['cum_naive_hedged']:>12,.2f}")
-    print(f"  MV Optimal:  ${final_pnl['cum_mv_hedged']:>12,.2f}")
+    print(f"  M1: Strangle Only  ${final_pnl['cum_unhedged']:>12,.2f}  (Option Greeks)")
+    print(f"  M2: Delta Hedge    ${final_pnl['cum_naive_hedged']:>12,.2f}  (1:1 Futures)")
+    print(f"  M3: MV Optimal     ${final_pnl['cum_mv_hedged']:>12,.2f}  (EWMA + Markowitz)")
     
     # Key insights
     print("\n" + "="*60)
-    print("KEY INSIGHTS")
+    print("METHODOLOGY COMPARISON INSIGHTS")
     print("="*60)
     
     metrics = engine.calculate_metrics()
@@ -177,15 +184,15 @@ def print_performance_summary(engine):
     
     if unhedged_vol > 0 and mv_vol > 0:
         vol_reduction = (unhedged_vol - mv_vol) / unhedged_vol * 100
-        print(f"  • MV Optimal reduces volatility by {vol_reduction:.1f}% vs unhedged")
+        print(f"  • M3 reduces volatility by {vol_reduction:.1f}% vs M1 (Strangle Only)")
     
     if naive_vol > 0 and mv_vol > 0:
         naive_reduction = (naive_vol - mv_vol) / naive_vol * 100
-        print(f"  • MV Optimal reduces volatility by {naive_reduction:.1f}% vs naive hedge")
+        print(f"  • M3 reduces volatility by {naive_reduction:.1f}% vs M2 (Delta Hedge)")
     
     mv_sharpe = metrics.get('mv_hedged_sharpe_ratio', 0)
     naive_sharpe = metrics.get('naive_hedged_sharpe_ratio', 0)
-    print(f"  • MV Optimal Sharpe: {mv_sharpe:.2f} vs Naive Sharpe: {naive_sharpe:.2f}")
+    print(f"  • M3 Sharpe: {mv_sharpe:.2f} vs M2 Sharpe: {naive_sharpe:.2f}")
     
     return summary
 
@@ -290,36 +297,48 @@ def save_results(engine, summary):
 def print_conclusion():
     """Print conclusion and key findings."""
     print("\n" + "="*80)
-    print("CONCLUSION")
+    print("CONCLUSION: THREE METHODOLOGY COMPARISON")
     print("="*80)
     print("""
-Key Findings:
+THREE METHODOLOGIES COMPARED:
 
-1. MEAN-VARIANCE OPTIMAL HEDGING:
-   - The MV optimal strategy consistently outperforms naive hedging
-   - Uses EWMA covariance (λ=0.94) to adapt to changing volatility regimes
-   - Maintains delta-neutral exposure while minimizing portfolio variance
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ M1: STRANGLE ONLY (Option Strategy - Lecture 6)                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│   - Short strangle position (10% OTM call + 10% OTM put)                    │
+│   - P&L from Greeks: Theta (time decay), Gamma, Vega, Delta                 │
+│   - No hedging: Full exposure to BTC price movements                        │
+│   - Highest return potential but highest volatility/risk                    │
+└──────────────────────────────────────────────────────────────────────────────┘
 
-2. VOLATILITY REDUCTION:
-   - MV optimal hedge significantly reduces P&L volatility vs unhedged
-   - Improvement over naive hedge varies by market regime
-   - Greatest benefit during high-volatility periods (e.g., FTX crash)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ M2: DELTA HEDGE (Delta-Hedging - Lecture 6)                                  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│   - Simple 1:1 hedge using BTC futures                                      │
+│   - Neutralizes delta exposure at each rebalance                            │
+│   - Reduces directional risk but ignores covariance structure               │
+│   - Moderate volatility reduction                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
 
-3. RISK-ADJUSTED RETURNS:
-   - Higher Sharpe ratio for MV optimal vs naive and unhedged
-   - Theta capture remains intact while reducing directional risk
-   - Lower max drawdown provides better risk management
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ M3: MV OPTIMAL (EWMA Lecture 7 + Markowitz Lecture 5)                        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│   - EWMA covariance estimation (λ=0.94, RiskMetrics)                        │
+│   - Mean-variance optimization with delta-neutrality constraint             │
+│   - Optimal weights: BTC Spot, BTC Futures, USDT Cash                       │
+│   - Best risk-adjusted returns (highest Sharpe, lowest volatility)          │
+└──────────────────────────────────────────────────────────────────────────────┘
 
-4. ROBO-ADVISOR APPLICATION:
-   - Risk aversion parameter allows personalization
-   - Conservative investors can maintain higher cash allocation
-   - Aggressive investors can seek higher expected returns
+KEY FINDINGS:
+   1. M3 achieves best risk-adjusted returns (Sharpe ratio)
+   2. M3 reduces volatility vs both M1 and M2
+   3. EWMA adapts to changing volatility regimes (e.g., FTX crash 2022)
+   4. Delta-neutrality preserves theta capture while reducing directional risk
 
-Recommendations:
-   - Use MV optimal hedging for systematic strangle selling
+RECOMMENDATIONS:
+   - Use M3 (MV Optimal) for systematic strangle selling
    - Rebalance daily to maintain delta neutrality
    - Monitor EWMA covariance for regime changes
-   - Adjust risk aversion based on market conditions
 """)
     print("="*80)
     print("  Analysis complete! Check 'figures/' and 'results/' directories.")
