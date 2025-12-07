@@ -170,6 +170,7 @@ def optimize_minimum_variance_portfolio(
     # Long-only constraint (optional)
     if long_only:
         constraints.append(w >= 0)
+
     
     # Solve optimization problem
     problem = cp.Problem(objective, constraints)
@@ -227,6 +228,8 @@ def _ensure_positive_definite(matrix: np.ndarray,
 
 def optimize_hedge_portfolio(cov_matrix: np.ndarray,
                              net_delta: float,
+                             concentration_limit: float = 0.5, # max 50% in single asset
+                             target_sharpe: float = None, # target sharpe ratio
                              expected_returns: np.ndarray = None,
                              risk_aversion: float = 0.0) -> Tuple[np.ndarray, Dict]:
     """
@@ -296,14 +299,24 @@ def optimize_hedge_portfolio(cov_matrix: np.ndarray,
         # Pure minimum variance
         objective = cp.Minimize(portfolio_variance)
     
+
     # Constraints
     constraints = [
         cp.sum(w) == 1,  # Fully invested
         w >= -0.5,       # Allow small shorts for flexibility
         w <= 1.5,        # Cap leverage
-        asset_deltas @ w == -net_delta  # Delta-neutral
+        asset_deltas @ w == -net_delta,  # Delta-neutral
+        # Additional Constraints: 
+        w <= concentration_limit, # concentration limits 
     ]
+
+    # maximum risk constraint (optional)
+    if target_sharpe is not None and expected_returns is not None:
+        max_volatility = expected_returns / target_sharpe
+        max_var = max_volatility**2
+        constraints.append(cp.quad_form (w, cov_matrix) <= max_var) # maximum risk constraint
     
+
     # Solve
     problem = cp.Problem(objective, constraints)
     
