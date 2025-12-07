@@ -229,6 +229,7 @@ def _ensure_positive_definite(matrix: np.ndarray,
 def optimize_hedge_portfolio(cov_matrix: np.ndarray,
                              net_delta: float,
                              concentration_limit: float = 0.3, # max 30% in single asset
+                             min_liquid_weight = 0.1,  # Keep at least 10% in cash for liquidity
                              target_sharpe: float = None, # target sharpe ratio
                              expected_returns: np.ndarray = None,
                              risk_aversion: float = 0.0) -> Tuple[np.ndarray, Dict]:
@@ -316,6 +317,7 @@ def optimize_hedge_portfolio(cov_matrix: np.ndarray,
         max_var = max_volatility**2
         constraints.append(cp.quad_form (w, cov_matrix) <= max_var) # maximum risk constraint
     
+    constraints.append(w[2] >= min_liquid_weight)
 
     # Solve
     problem = cp.Problem(objective, constraints)
