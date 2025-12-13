@@ -170,6 +170,7 @@ def optimize_minimum_variance_portfolio(
     # Long-only constraint (optional)
     if long_only:
         constraints.append(w >= 0)
+
     
     # Solve optimization problem
     problem = cp.Problem(objective, constraints)
@@ -192,23 +193,57 @@ def optimize_minimum_variance_portfolio(
             }
         else:
             # Fallback to naive hedge
-            return _naive_hedge_fallback(net_delta)
+            # return _naive_hedge_fallback(net_delta)
+            return _smart_fallback(net_delta, cov_matrix)
             
     except Exception as e:
         print(f"Optimization failed: {e}")
-        return _naive_hedge_fallback(net_delta)
+        # return _naive_hedge_fallback(net_delta)
+        return _smart_fallback(net_delta, cov_matrix)
 
 
-def _naive_hedge_fallback(net_delta: float) -> Dict[str, any]:
-    """Fallback to naive 1:1 futures hedge when optimization fails."""
+# def _naive_hedge_fallback(net_delta: float) -> Dict[str, any]:
+#     """Fallback to naive 1:1 futures hedge when optimization fails."""
+#     return {
+#         'weights': np.array([0.0, -net_delta, 1.0 + net_delta]),
+#         'variance': np.nan,
+#         'volatility': np.nan,
+#         'status': 'fallback',
+#         'w_spot': 0.0,
+#         'w_futures': -net_delta,
+#         'w_cash': 1.0 + net_delta
+#     }
+
+def _smart_fallback(net_delta: float, 
+                    cov_matrix: np.ndarray) -> Dict:
+    """
+    Smart fallback that considers both delta and risk.
+    """
+    # Calculate hedge ratio from minimum variance hedge formula
+    # h* = Cov(S,F) / Var(F)
+    cov_spot_futures = cov_matrix[0, 1]
+    var_futures = cov_matrix[1, 1]
+    
+    hedge_ratio = cov_spot_futures / (var_futures + 1e-10)
+    
+    # Combine delta hedge with MV hedge ratio
+    alpha = 0.5  # Weight between delta (1.0) and MV hedge
+    optimal_futures = alpha * (-net_delta) + (1 - alpha) * hedge_ratio * (-net_delta)
+    
+    w_futures = np.clip(optimal_futures, -0.5, 1.0)
+    w_cash = 1.0 - w_futures
+    w_spot = 0.0
+    
+    weights = np.array([w_spot, w_futures, w_cash])
+    
     return {
-        'weights': np.array([0.0, -net_delta, 1.0 + net_delta]),
-        'variance': np.nan,
-        'volatility': np.nan,
-        'status': 'fallback',
-        'w_spot': 0.0,
-        'w_futures': -net_delta,
-        'w_cash': 1.0 + net_delta
+        'weights': weights,
+        'variance': weights @ cov_matrix @ weights,
+        'volatility': np.sqrt(weights @ cov_matrix @ weights),
+        'status': 'smart_fallback',
+        'w_spot': w_spot,
+        'w_futures': w_futures,
+        'w_cash': w_cash
     }
 
 
@@ -227,6 +262,10 @@ def _ensure_positive_definite(matrix: np.ndarray,
 
 def optimize_hedge_portfolio(cov_matrix: np.ndarray,
                              net_delta: float,
+                             concentration_limit: float = 0.333, # max 33% in single asset
+                             min_liquid_weight = 0.1,  # Keep at least 10% in cash for liquidity
+                             lambda_reg: float = 1e-4,
+                             target_sharpe: float = None, # target sharpe ratio
                              expected_returns: np.ndarray = None,
                              risk_aversion: float = 0.0) -> Tuple[np.ndarray, Dict]:
     """
@@ -266,7 +305,7 @@ def optimize_hedge_portfolio(cov_matrix: np.ndarray,
     is combination of tangency portfolio and risk-free.
     """
     n_assets = 3  # spot, futures, cash
-    
+
     # Ensure positive definite
     cov_matrix = ensure_positive_definite(cov_matrix)
     
@@ -283,27 +322,49 @@ def optimize_hedge_portfolio(cov_matrix: np.ndarray,
     
     # Decision variable
     w = cp.Variable(n_assets)
+
+    # penalize extreme positions
+    regularization = lambda_reg * cp.sum_squares(w)
     
     # Objective: min variance - λ * expected return (if risk_aversion > 0)
     portfolio_variance = cp.quad_form(w, cov_matrix)
     portfolio_return = expected_returns @ w
     
+    # if risk_aversion > 0:
+    #     # Mean-variance utility: max(μ - (A/2)*σ²)
+    #     # Equivalent to: min((A/2)*σ² - μ)
+    #     objective = cp.Minimize(risk_aversion/2 * portfolio_variance - portfolio_return)
+    # else:
+    #     # Pure minimum variance
+    #     objective = cp.Minimize(portfolio_variance)
     if risk_aversion > 0:
-        # Mean-variance utility: max(μ - (A/2)*σ²)
-        # Equivalent to: min((A/2)*σ² - μ)
-        objective = cp.Minimize(risk_aversion/2 * portfolio_variance - portfolio_return)
+        # Mean-variance utility with regularization
+        # Objective: min((A/2)*σ² - μ + λ_reg * ||w||²)
+        objective = cp.Minimize(risk_aversion/2 * portfolio_variance - portfolio_return + regularization)
     else:
-        # Pure minimum variance
-        objective = cp.Minimize(portfolio_variance)
+        # Pure minimum variance with regularization
+        # Objective: min(σ² + λ_reg * ||w||²)
+        objective = cp.Minimize(portfolio_variance + regularization)
     
+
     # Constraints
     constraints = [
         cp.sum(w) == 1,  # Fully invested
         w >= -0.5,       # Allow small shorts for flexibility
         w <= 1.5,        # Cap leverage
-        asset_deltas @ w == -net_delta  # Delta-neutral
+        asset_deltas @ w == -net_delta,  # Delta-neutral
+        # Additional Constraints: 
+        w <= concentration_limit, # concentration limits 
     ]
+
+    # maximum risk constraint (optional)
+    if target_sharpe is not None and expected_returns is not None:
+        max_volatility = expected_returns / target_sharpe
+        max_var = max_volatility**2
+        constraints.append(cp.quad_form (w, cov_matrix) <= max_var) # maximum risk constraint
     
+    constraints.append(w[2] >= min_liquid_weight)
+
     # Solve
     problem = cp.Problem(objective, constraints)
     
@@ -339,7 +400,6 @@ def optimize_hedge_portfolio(cov_matrix: np.ndarray,
         fallback_weights /= fallback_weights.sum()
         
         return fallback_weights, {'status': 'error', 'message': str(e)}
-
 
 def compute_naive_delta_hedge(net_delta: float) -> Dict[str, float]:
     """
