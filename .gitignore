@@ -43,6 +43,9 @@ data/*.csv
 data/*.pkl
 *.log
 
+*.aux
+*.out
+
 # OS
 .DS_Store
 Thumbs.db
